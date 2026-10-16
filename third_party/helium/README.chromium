@@ -1,0 +1,36 @@
+Name: Helium
+Short Name: helium
+URL: https://github.com/imputnet/helium
+Version: 0.14.7
+Revision: 8030a8a3050151a141c06cc5a85f95cbbdc42a25
+License: GPL-3.0-only
+License File: LICENSE
+Shipped: yes
+Security Critical: no
+
+Description:
+cmux adapts Helium vertical-tab, group-layout, tab-style, omnibar, and
+context-menu patches to its Chromium-hosted workspace UI, and adapts Helium's
+settings/WebUI appearance patches and default-on rounded content frame to
+Chromium 151, with Chromium 149 retained only as a compatibility fallback. The
+rail
+adaptations are modified because a cmux rail row represents a workspace rather
+than a tab. The settings adaptation is modified to use cmux naming and to omit
+Helium-only services and preferences. Detailed source paths, comparison
+revisions, contributor attribution, and relevant upstream commits are listed
+in ../../THIRD_PARTY_NOTICES.md.
+
+Local Modifications:
+Helium tab/group concepts are translated onto WindowModel workspaces and
+workspace groups. Chromium's BSD-licensed collection animation manager is
+adapted separately and is not represented as Helium-authored code. Settings
+patches are rebased onto Chromium 151.0.7922.34, rename the Helium color token
+to cmux, keep hidden pages routable, correct the imported SVG markup, and
+register the rounded-frame preference. The custom terminal/browser surface
+port preserves Helium's 3-DIP inset, attached-chrome edge treatment, 8-DIP
+ordinary radius, native-window-concentric bottom radii, 1-DIP separator
+outline, and fullscreen suppression. The 151 port was reviewed against Helium
+main at Chromium 150.0.7871.128 because Helium does not yet publish a Chromium
+151 patch base. The pane-local side-panel resize geometry was reviewed against
+Helium revision `dee5600297344dd25b2dddb2ba343e19be7723f7` at Chromium
+150.0.7871.181 (revision 8).

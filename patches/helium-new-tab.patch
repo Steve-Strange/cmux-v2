@@ -1,0 +1,1220 @@
+From 44af2daaea86804830c56dd03813c6a20aceacfa Mon Sep 17 00:00:00 2001
+From: Helium contributors <https://github.com/imputnet/helium>
+Date: Tue, 28 Jul 2026 00:00:00 -0700
+Subject: [PATCH] cmux: adapt Helium's clean New Tab page
+
+Adapted from Helium revision 8030a8a3050151a141c06cc5a85f95cbbdc42a25
+(0.14.7, Chromium 150.0.7871.128 revision 7), specifically:
+
+  patches/helium/ui/always-use-better-ntp.patch
+  patches/helium/ui/clean-new-tab-page.patch
+  patches/helium/ui/fix-customize-side-panel.patch
+  patches/helium/ui/restyle-ntp-tiles.patch
+  patches/helium/ui/square-ntp-monograms.patch
+
+The M151 adaptation keeps Chromium's live NTP DOM and hides its promotional,
+search, and module surfaces in CSS. This preserves Customize Chrome's native
+background/shortcut state while presenting Helium's centered shortcut layout.
+
+Helium is GPL-3.0-only; see third_party/helium/LICENSE and
+THIRD_PARTY_NOTICES.md.
+---
+ .../new_tab_page/new_tab_page_handler.cc      |  10 +-
+ .../customize_chrome_page_handler.cc          |  55 +++-
+ .../customize_chrome_page_handler.h           |  17 ++
+ .../customize_chrome/customize_chrome.mojom   |  19 ++
+ chrome/browser/resources/new_tab_page/app.css |  17 ++
+ .../side_panel/customize_chrome/app.ts        | 132 +++++++--
+ .../side_panel/customize_chrome/app.css       | 252 +++++++++++++++++-
+ .../side_panel/customize_chrome/app.html.ts   | 109 ++++++++
+ .../side_panel/customize_chrome/appearance.ts |   4 -
+ chrome/browser/search/search.cc               |  57 +---
+ .../customize_buttons/customize_buttons.css   |  16 +-
+ .../customize_buttons.html.ts                 |  17 --
+ ui/gfx/monogram_utils.cc                      |   2 +-
+ .../most_visited/most_visited.css             |  15 +-
+ .../most_visited/most_visited.ts              |   2 +-
+ .../webui/chrome_web_ui_controller_factory.cc |  10 +
+ .../browser/ui/webui/chrome_web_ui_configs.cc |   2 +
+ 17 files changed, 610 insertions(+), 126 deletions(-)
+
+diff --git a/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.cc b/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.cc
+index 851f381c..fcb17294 100644
+--- a/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.cc
++++ b/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.cc
+@@ -1001,7 +1001,10 @@ void NewTabPageHandler::UpdateFooterVisibility() {
+   }
+
+   auto* footer_controller = browser->GetFeatures().new_tab_footer_controller();
+-  CHECK(footer_controller);
++  if (!footer_controller) {
++    OnFooterVisibilityUpdated(false);
++    return;
++  }
+   OnFooterVisibilityUpdated(footer_controller->GetFooterVisible(web_contents_));
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ }
+@@ -1378,7 +1381,10 @@ void NewTabPageHandler::OnBrowserWindowInterfaceChanged() {
+   }
+
+   auto* footer_controller = browser->GetFeatures().new_tab_footer_controller();
+-  CHECK(footer_controller);
++  // cmux hosts browser tabs without Chromium's native toolbar footer.
++  if (!footer_controller) {
++    return;
++  }
+   footer_controller_observation_.Observe(footer_controller);
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ }
+diff --git a/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome_page_handler.cc b/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome_page_handler.cc
+index bc5a2cbf..ba035f5c 100644
+--- a/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome_page_handler.cc
++++ b/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome_page_handler.cc
+@@ -8,14 +8,17 @@
+ #include <utility>
+ #include <vector>
+
++#include "base/functional/bind.h"
+ #include "base/metrics/field_trial_params.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/metrics/histogram_macros.h"
+ #include "base/metrics/user_metrics.h"
+ #include "base/metrics/user_metrics_action.h"
+ #include "base/strings/escape.h"
++#include "base/strings/stringprintf.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/browser_process.h"
++#include "chrome/browser/cmux_term/cmux_configure_page.h"
+ #include "chrome/browser/enterprise/browser_management/management_service_factory.h"
+ #include "chrome/browser/enterprise/util/managed_browser_utils.h"
+ #include "chrome/browser/extensions/settings_api_helpers.h"
+@@ -68,6 +71,11 @@
+
+ namespace {
+
++std::string CmuxCssColor(cmux::CmuxArgb color) {
++  return base::StringPrintf("#%02x%02x%02x", cmux::CmuxArgbR(color),
++                            cmux::CmuxArgbG(color), cmux::CmuxArgbB(color));
++}
++
+ void OpenWebPage(Profile* profile, const GURL& url) {
+   NavigateParams navigate_params(profile, url, ui::PAGE_TRANSITION_LINK);
+   navigate_params.window_action = NavigateParams::WindowAction::kShowWindow;
+@@ -398,6 +406,47 @@ void CustomizeChromePageHandler::UpdateThemeEditable(bool is_theme_editable) {
+   page_->SetThemeEditable(is_theme_editable);
+ }
+
++void CustomizeChromePageHandler::GetCmuxThemePickerState(
++    GetCmuxThemePickerStateCallback callback) {
++  cmux::LoadCmuxThemePickerState(base::BindOnce(
++      &CustomizeChromePageHandler::OnCmuxThemePickerStateLoaded,
++      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
++}
++
++void CustomizeChromePageHandler::OnCmuxThemePickerStateLoaded(
++    GetCmuxThemePickerStateCallback callback,
++    std::vector<cmux::GhosttyThemePreview> themes,
++    std::string selected_theme) {
++  cmux_ghostty_themes_.clear();
++  std::vector<side_panel::mojom::CmuxGhosttyThemePreviewPtr> theme_previews;
++  theme_previews.reserve(themes.size());
++  for (const cmux::GhosttyThemePreview& theme : themes) {
++    cmux_ghostty_themes_.insert(theme.name);
++    auto preview = side_panel::mojom::CmuxGhosttyThemePreview::New();
++    preview->name = theme.name;
++    preview->background = CmuxCssColor(theme.background);
++    preview->foreground = CmuxCssColor(theme.foreground);
++    preview->cursor = CmuxCssColor(theme.cursor);
++    preview->palette.reserve(theme.palette.size());
++    for (cmux::CmuxArgb color : theme.palette) {
++      preview->palette.push_back(CmuxCssColor(color));
++    }
++    theme_previews.push_back(std::move(preview));
++  }
++  auto state = side_panel::mojom::CmuxThemePickerState::New();
++  state->themes = std::move(theme_previews);
++  state->selected_theme = std::move(selected_theme);
++  std::move(callback).Run(std::move(state));
++}
++
++void CustomizeChromePageHandler::SetCmuxGhosttyTheme(
++    const std::string& theme,
++    SetCmuxGhosttyThemeCallback callback) {
++  const bool valid =
++      theme.empty() || cmux_ghostty_themes_.contains(theme);
++  std::move(callback).Run(valid && cmux::ApplyCmuxGhosttyTheme(theme));
++}
++
+ void CustomizeChromePageHandler::OpenChromeWebStore() {
+   open_url_callback_.Run(
+       GURL("https://chromewebstore.google.com/category/themes"));
+@@ -547,7 +596,11 @@ void CustomizeChromePageHandler::OnBrowserWindowInterfaceChanged() {
+   }
+
+   auto* footer_controller = browser->GetFeatures().new_tab_footer_controller();
+-  CHECK(footer_controller);
++  // cmux hosts the full Customize Chrome side panel without Chromium's
++  // BrowserView-owned New Tab footer.
++  if (!footer_controller) {
++    return;
++  }
+   footer_controller_observation_.Observe(footer_controller);
+ }
+
+diff --git a/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome_page_handler.h b/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome_page_handler.h
+index 23230fb0..8be77dc7 100644
+--- a/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome_page_handler.h
++++ b/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome_page_handler.h
+@@ -6,6 +6,8 @@
+ #define CHROME_BROWSER_UI_WEBUI_SIDE_PANEL_CUSTOMIZE_CHROME_CUSTOMIZE_CHROME_PAGE_HANDLER_H_
+
+ #include <optional>
++#include <set>
++#include <string>
+ #include <vector>
+
+ #include "base/containers/flat_map.h"
+@@ -39,6 +41,10 @@ namespace content {
+ class WebContents;
+ }  // namespace content
+
++namespace cmux {
++struct GhosttyThemePreview;
++}  // namespace cmux
++
+ namespace new_tab_footer {
+ class NewTabFooterController;
+ }
+@@ -126,6 +132,11 @@ class CustomizeChromePageHandler
+   void RemoveBackgroundImage() override;
+   void UpdateTheme() override;
+   void UpdateThemeEditable(bool is_theme_editable) override;
++  void GetCmuxThemePickerState(
++      GetCmuxThemePickerStateCallback callback) override;
++  void SetCmuxGhosttyTheme(
++      const std::string& theme,
++      SetCmuxGhosttyThemeCallback callback) override;
+   void OpenChromeWebStore() override;
+   void OpenThirdPartyThemePage(const std::string& theme_id) override;
+   void OpenChromeWebStoreCategoryPage(
+@@ -193,6 +204,11 @@ class CustomizeChromePageHandler
+   // Called when the embedding BrowserWindowInterface has changed.
+   void OnBrowserWindowInterfaceChanged();
+
++  void OnCmuxThemePickerStateLoaded(
++      GetCmuxThemePickerStateCallback callback,
++      std::vector<cmux::GhosttyThemePreview> themes,
++      std::string selected_theme);
++
+   ChooseLocalCustomBackgroundCallback choose_local_custom_background_callback_;
+   raw_ptr<NtpCustomBackgroundService> ntp_custom_background_service_;
+   raw_ptr<Profile> profile_;
+@@ -241,6 +257,7 @@ class CustomizeChromePageHandler
+   // Callback used to open a URL.
+   base::RepeatingCallback<void(const GURL&)> open_url_callback_;
+
++  std::set<std::string> cmux_ghostty_themes_;
+   base::WeakPtrFactory<CustomizeChromePageHandler> weak_ptr_factory_{this};
+ };
+
+diff --git a/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome.mojom b/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome.mojom
+index 7a8c2af1..59143bc1 100644
+--- a/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome.mojom
++++ b/chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome.mojom
+@@ -132,6 +132,19 @@ enum NewTabPageType {
+ };
+
+ // Used by the WebUI page to bootstrap bidirectional communication.
++struct CmuxGhosttyThemePreview {
++  string name;
++  string background;
++  string foreground;
++  string cursor;
++  array<string> palette;
++};
++
++struct CmuxThemePickerState {
++  array<CmuxGhosttyThemePreview> themes;
++  string selected_theme;
++};
++
+ interface CustomizeChromePageHandlerFactory {
+   // The WebUI calls this method when the page is first initialized.
+   CreatePageHandler(pending_remote<CustomizeChromePage> page,
+@@ -187,6 +200,12 @@ interface CustomizeChromePageHandler {
+   // daily refresh is turned off.
+   SetDailyRefreshCollectionId(string collection_id);
+
++  // Returns the complete bundled Ghostty theme catalog and active selection.
++  GetCmuxThemePickerState() => (CmuxThemePickerState state);
++
++  // Applies a bundled Ghostty theme. An empty value follows Ghostty config.
++  SetCmuxGhosttyTheme(string theme) => (bool success);
++
+   // Open Chrome Web Store's theme page in a new tab.
+   OpenChromeWebStore();
+
+diff --git a/chrome/browser/resources/new_tab_page/app.css b/chrome/browser/resources/new_tab_page/app.css
+index a23fce16..ac5cf0d8 100644
+--- a/chrome/browser/resources/new_tab_page/app.css
++++ b/chrome/browser/resources/new_tab_page/app.css
+@@ -156,6 +156,7 @@ cr-most-visited {
+   align-items: center;
+   display: flex;
+   flex-direction: column;
++  justify-content: center;
+   height: calc(100vh - var(--ntp-one-google-bar-height));
+   min-width: fit-content; /* Prevents OneGoogleBar cutoff at 500% zoom. */
+   padding-top: var(--ntp-one-google-bar-height);
+@@ -163,6 +164,22 @@ cr-most-visited {
+   z-index: 1;
+ }
+
++/* Helium's local NTP is intentionally shortcut-first. Keep Chromium's live
++ * elements in the document so its customization state remains authoritative,
++ * but remove Google/search/promo/module chrome from layout and paint. */
++#oneGoogleBarStackingContext,
++#oneGoogleBarScrim,
++#oneGoogleBar,
++#logo,
++#searchboxContainer,
++ntp-action-chips,
++ntp-middle-slot-promo,
++#modules,
++individual-promos,
++#backgroundImageAttribution {
++  display: none !important;
++}
++
+ /*
+  * Below 900px, the threads rail will shift the main content aside.
+  * This happens in conjunction with the realbox width change as well,
+diff --git a/chrome/browser/resources/side_panel/customize_chrome/app.ts b/chrome/browser/resources/side_panel/customize_chrome/app.ts
+index 63d5b838..850a81bd 100644
+--- a/chrome/browser/resources/side_panel/customize_chrome/app.ts
++++ b/chrome/browser/resources/side_panel/customize_chrome/app.ts
+@@ -8,6 +8,7 @@ import 'chrome://resources/cr_elements/cr_button/cr_button.js';
+ import 'chrome://resources/cr_elements/cr_chip/cr_chip.js';
+ import 'chrome://resources/cr_elements/cr_icon/cr_icon.js';
+ import 'chrome://resources/cr_elements/cr_page_selector/cr_page_selector.js';
++import 'chrome://resources/cr_elements/cr_search_field/cr_search_field.js';
+ import 'chrome://resources/cr_elements/icons.html.js';
+ import './appearance.js';
+ import './cards.js';
+@@ -26,11 +27,16 @@ import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
+ import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
+ import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
+
++import type {SpHeadingElement} from 'chrome://customize-chrome-side-panel.top-chrome/shared/sp_heading.js';
+ import {getCss} from './app.css.js';
+ import {getHtml} from './app.html.js';
+ import type {AppearanceElement} from './appearance.js';
+ import type {CategoriesElement} from './categories.js';
+-import type {BackgroundCollection, ManagementNoticeState} from './customize_chrome.mojom-webui.js';
++import type {
++  BackgroundCollection,
++  CmuxGhosttyThemePreview,
++  ManagementNoticeState,
++} from './customize_chrome.mojom-webui.js';
+ import {ChromeWebStoreCategory, ChromeWebStoreCollection, CustomizeChromeSection, NewTabPageType} from './customize_chrome.mojom-webui.js';
+ import {CustomizeChromeApiProxy} from './customize_chrome_api_proxy.js';
+ import type {ThemesElement} from './themes.js';
+@@ -49,6 +55,7 @@ const CHANGE_CHROME_THEME_BUTTON_ELEMENT_ID =
+ export enum CustomizeChromePage {
+   OVERVIEW = 'overview',
+   CATEGORIES = 'categories',
++  GHOSTTY_THEMES = 'ghostty-themes',
+   THEMES = 'themes',
+   TOOLBAR = 'toolbar',
+   WALLPAPER_SEARCH = 'wallpaper-search',
+@@ -60,6 +67,8 @@ export interface AppElement {
+   $: {
+     overviewPage: HTMLElement,
+     categoriesPage: CategoriesElement,
++    cmuxAppearanceButton: HTMLElement,
++    ghosttyThemesHeading: SpHeadingElement,
+     themesPage: ThemesElement,
+     appearanceElement: AppearanceElement,
+   };
+@@ -94,6 +103,11 @@ export class AppElement extends AppElementBase {
+       showEditTheme_: {type: Boolean},
+       showFooter_: {type: Boolean},
+       showFooterForManagedBrowser_: {type: Boolean},
++      ghosttyThemes_: {type: Array},
++      ghosttyThemeQuery_: {type: String},
++      selectedGhosttyTheme_: {type: String},
++      ghosttyThemesLoading_: {type: Boolean},
++      ghosttyThemeError_: {type: String},
+     };
+   }
+
+@@ -119,8 +133,14 @@ export class AppElement extends AppElementBase {
+   protected accessor showEditTheme_: boolean = true;
+   protected accessor showFooter_: boolean = false;
+   protected accessor showFooterForManagedBrowser_: boolean = false;
++  protected accessor ghosttyThemes_: CmuxGhosttyThemePreview[] = [];
++  protected accessor ghosttyThemeQuery_: string = '';
++  protected accessor selectedGhosttyTheme_: string = '';
++  protected accessor ghosttyThemesLoading_: boolean = false;
++  protected accessor ghosttyThemeError_: string = '';
+
+   private listenerIds_: number[] = [];
++  private ghosttyThemeSaveGeneration_: number = 0;
+   private apiProxy_: CustomizeChromeApiProxy =
+       CustomizeChromeApiProxy.getInstance();
+
+@@ -130,8 +150,6 @@ export class AppElement extends AppElementBase {
+     this.listenerIds_ = [
+       this.apiProxy_.callbackRouter.scrollToSection.addListener(
+           this.onScrollToSection_.bind(this)),
+-      this.apiProxy_.callbackRouter.attachedTabStateUpdated.addListener(
+-          this.onAttachedTabStateUpdated_.bind(this)),
+       this.apiProxy_.callbackRouter.setThemeEditable.addListener(
+           this.onSetThemeEditable_.bind(this)),
+       this.apiProxy_.callbackRouter.setFooterSettings.addListener(
+@@ -218,22 +236,6 @@ export class AppElement extends AppElementBase {
+     element.scrollIntoView({behavior: 'auto'});
+   }
+
+-
+-  private onAttachedTabStateUpdated_(newTabPageType: NewTabPageType) {
+-    if (this.newTabPageType_ === newTabPageType) {
+-      return;
+-    }
+-
+-    this.newTabPageType_ = newTabPageType;
+-
+-    // Since some pages aren't supported in non first party mode,
+-    // change the section back to the overview.
+-    if (!this.isSourceTabFirstPartyNtp_() &&
+-        !this.pageSupportedOnNonFirstPartyNtps()) {
+-      this.page_ = CustomizeChromePage.OVERVIEW;
+-    }
+-  }
+-
+   private onSetThemeEditable_(isThemeEditable: boolean) {
+     this.showEditTheme_ = isThemeEditable;
+   }
+@@ -268,6 +270,11 @@ export class AppElement extends AppElementBase {
+         await this.updateComplete;
+         this.$.appearanceElement.focusOnThemeButton();
+         break;
++      case CustomizeChromePage.GHOSTTY_THEMES:
++        this.page_ = CustomizeChromePage.OVERVIEW;
++        await this.updateComplete;
++        this.$.cmuxAppearanceButton.focus();
++        break;
+       case CustomizeChromePage.THEMES:
+       case CustomizeChromePage.WALLPAPER_SEARCH:
+         this.page_ = CustomizeChromePage.CATEGORIES;
+@@ -345,6 +352,89 @@ export class AppElement extends AppElementBase {
+         'Actions.CustomizeToolbarSidePanel.OpenedFromCustomizeChrome');
+   }
+
++  protected async onCmuxAppearanceButtonClick_() {
++    this.page_ = CustomizeChromePage.GHOSTTY_THEMES;
++    this.ghosttyThemeQuery_ = '';
++    void this.loadCmuxGhosttyThemes_();
++    await this.updateComplete;
++    this.$.ghosttyThemesHeading.getBackButton().focus();
++  }
++
++  protected onGhosttyThemeSearchChanged_(event: CustomEvent<string>) {
++    this.ghosttyThemeQuery_ = event.detail;
++  }
++
++  protected onGhosttyThemesBackButtonClick_() {
++    void this.onBackClick_();
++  }
++
++  protected getGhosttyThemeSelectHandler_(theme: string) {
++    return () => {
++      void this.onGhosttyThemeSelect_(theme);
++    };
++  }
++
++  protected getFilteredGhosttyThemes_(): CmuxGhosttyThemePreview[] {
++    const query = this.ghosttyThemeQuery_.trim().toLowerCase();
++    if (!query) {
++      return this.ghosttyThemes_;
++    }
++    return this.ghosttyThemes_.filter(
++        theme => theme.name.toLowerCase().includes(query));
++  }
++
++  protected getGhosttyThemePreviewStyle_(
++      theme: CmuxGhosttyThemePreview): string {
++    return [
++      `--ghostty-preview-background: ${theme.background}`,
++      `--ghostty-preview-foreground: ${theme.foreground}`,
++      `--ghostty-preview-cursor: ${theme.cursor}`,
++    ].join(';');
++  }
++
++  protected async onGhosttyThemeSelect_(theme: string) {
++    if (theme === this.selectedGhosttyTheme_) {
++      return;
++    }
++
++    const previousTheme = this.selectedGhosttyTheme_;
++    const generation = ++this.ghosttyThemeSaveGeneration_;
++    this.selectedGhosttyTheme_ = theme;
++    this.ghosttyThemeError_ = '';
++    try {
++      const {success} =
++          await this.apiProxy_.handler.setCmuxGhosttyTheme(theme);
++      if (generation !== this.ghosttyThemeSaveGeneration_) {
++        return;
++      }
++      if (!success) {
++        this.selectedGhosttyTheme_ = previousTheme;
++        this.ghosttyThemeError_ = 'Could not apply that Ghostty theme.';
++      }
++    } catch {
++      if (generation === this.ghosttyThemeSaveGeneration_) {
++        this.selectedGhosttyTheme_ = previousTheme;
++        this.ghosttyThemeError_ = 'Could not apply that Ghostty theme.';
++      }
++    }
++  }
++
++  private async loadCmuxGhosttyThemes_() {
++    this.ghosttyThemesLoading_ = true;
++    this.ghosttyThemeError_ = '';
++    try {
++      const {state} =
++          await this.apiProxy_.handler.getCmuxThemePickerState();
++      this.ghosttyThemes_ = state.themes;
++      this.selectedGhosttyTheme_ = state.selectedTheme;
++    } catch {
++      this.ghosttyThemeError_ =
++          'Could not load the bundled Ghostty themes.';
++    } finally {
++      this.ghosttyThemesLoading_ = false;
++    }
++  }
++
+   private async openToolbarCustomizationPage() {
+     this.page_ = CustomizeChromePage.TOOLBAR;
+     const page = this.shadowRoot.querySelector('customize-chrome-toolbar');
+@@ -352,10 +442,6 @@ export class AppElement extends AppElementBase {
+     await this.updateComplete;
+     page.focusOnBackButton();
+   }
+-
+-  private pageSupportedOnNonFirstPartyNtps() {
+-    return this.page_ === CustomizeChromePage.TOOLBAR;
+-  }
+ }
+
+ declare global {
+diff --git a/chrome/browser/resources/side_panel/customize_chrome/app.css b/chrome/browser/resources/side_panel/customize_chrome/app.css
+index 6b77d79a..7ae1d463 100644
+--- a/chrome/browser/resources/side_panel/customize_chrome/app.css
++++ b/chrome/browser/resources/side_panel/customize_chrome/app.css
+@@ -34,7 +34,8 @@ sp-heading {
+   max-width: calc(360px - 2 * var(--sp-body-padding));
+ }
+
+-#toolbarButton {
++#toolbarButton,
++#cmuxAppearanceButton {
+   border: none;
+   color: var(--cr-primary-text-color);
+   display: flex;
+@@ -59,7 +60,8 @@ customize-chrome-cards,
+ customize-chrome-categories,
+ customize-chrome-themes,
+ customize-chrome-wallpaper-search,
+-customize-chrome-toolbar {
++customize-chrome-toolbar,
++#ghosttyThemesPage {
+   display: block;
+   max-width: 360px;
+   width: 100%;
+@@ -97,3 +99,249 @@ customize-chrome-appearance {
+ #productivityButton .cr-icon {
+   --cr-icon-image: url(icons/productivity.svg);
+ }
++
++#ghosttyThemesCard {
++  max-width: calc(360px - 2 * var(--sp-body-padding));
++  overflow: hidden;
++}
++
++#ghosttyThemesHeading {
++  padding: 0;
++}
++
++.ghostty-theme-intro {
++  color: var(--cr-secondary-text-color);
++  font-weight: 400;
++  line-height: 18px;
++  margin: 0;
++  padding: 0 16px 20px;
++}
++
++#ghosttyThemeSearch {
++  --cr-search-field-input-border-bottom: none;
++  --cr-search-field-input-min-height: 20px;
++  --cr-search-field-input-width: 100%;
++  --cr-search-field-search-icon-display: none;
++  --cr-search-field-search-icon-inline-display: inline-flex;
++  background: var(--color-sys-surface3);
++  border-radius: 22px;
++  box-sizing: border-box;
++  margin: 0 16px 10px;
++  padding: 12px;
++  width: calc(100% - 32px);
++}
++
++#ghosttyThemeCount {
++  color: var(--cr-secondary-text-color);
++  font-size: 12px;
++  font-weight: 400;
++  line-height: 18px;
++  padding: 2px 16px 16px;
++}
++
++#ghosttyThemeList {
++  border-top: 1px solid var(--color-sys-divider);
++  padding: 10px 0;
++}
++
++.ghostty-theme-option {
++  align-items: center;
++  appearance: none;
++  background: transparent;
++  border: 0;
++  box-sizing: border-box;
++  color: var(--cr-primary-text-color);
++  cursor: pointer;
++  display: flex;
++  font: inherit;
++  gap: 14px;
++  min-height: 76px;
++  padding: 10px 16px;
++  text-align: start;
++  width: 100%;
++}
++
++.ghostty-theme-option:hover {
++  background-color: var(--cr-hover-background-color);
++}
++
++.ghostty-theme-option:focus-within {
++  background-color: var(--cr-menu-background-focus-color);
++  outline: none;
++}
++
++.ghostty-theme-option:has(.ghostty-theme-radio:checked) {
++  background-color: var(--color-sys-tonal-container);
++}
++
++.ghostty-theme-radio {
++  height: 1px;
++  opacity: 0;
++  position: absolute;
++  width: 1px;
++}
++
++.ghostty-theme-option-copy {
++  display: flex;
++  flex: 1 1 auto;
++  flex-direction: column;
++  gap: 3px;
++  min-width: 0;
++}
++
++.ghostty-theme-name {
++  font-size: 12px;
++  font-weight: 500;
++  line-height: 18px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.ghostty-theme-description {
++  color: var(--cr-secondary-text-color);
++  font-size: 10px;
++  font-weight: 400;
++  line-height: 14px;
++  white-space: normal;
++}
++
++.ghostty-theme-preview {
++  --ghostty-preview-background: #1e1e1e;
++  --ghostty-preview-cursor: #f5f5f5;
++  --ghostty-preview-foreground: #f5f5f5;
++  background: var(--ghostty-preview-background);
++  border: 1px solid
++      color-mix(in srgb, var(--ghostty-preview-foreground) 24%, transparent);
++  border-radius: 8px;
++  box-shadow: 0 2px 5px rgb(0 0 0 / 18%);
++  box-sizing: border-box;
++  display: block;
++  flex: 0 0 64px;
++  height: 48px;
++  overflow: hidden;
++  position: relative;
++  width: 64px;
++}
++
++.ghostty-theme-preview-bar {
++  align-items: center;
++  background:
++      color-mix(in srgb, var(--ghostty-preview-foreground) 10%, transparent);
++  display: flex;
++  gap: 3px;
++  height: 12px;
++  padding-inline-start: 6px;
++}
++
++.ghostty-theme-preview-bar i {
++  background:
++      color-mix(in srgb, var(--ghostty-preview-foreground) 55%, transparent);
++  border-radius: 50%;
++  height: 3px;
++  width: 3px;
++}
++
++.ghostty-theme-preview-command {
++  align-items: center;
++  display: flex;
++  gap: 3px;
++  height: 27px;
++  padding: 0 6px 3px;
++}
++
++.ghostty-theme-preview-command b {
++  color: var(--ghostty-preview-cursor);
++  font-size: 10px;
++  font-weight: 700;
++  line-height: 10px;
++}
++
++.ghostty-theme-preview-command i,
++.ghostty-theme-preview-command em {
++  background: var(--ghostty-preview-foreground);
++  border-radius: 1px;
++  height: 3px;
++  opacity: 0.8;
++  width: 17px;
++}
++
++.ghostty-theme-preview-command em {
++  opacity: 0.4;
++  width: 10px;
++}
++
++.ghostty-theme-preview-swatches {
++  bottom: 0;
++  display: grid;
++  grid-template-columns: repeat(8, 1fr);
++  height: 8px;
++  inset-inline: 0;
++  position: absolute;
++}
++
++.ghostty-theme-preview-swatches i {
++  background: var(--ghostty-preview-swatch);
++}
++
++.ghostty-theme-preview-auto {
++  --ghostty-preview-background: var(--color-sys-surface);
++  --ghostty-preview-cursor: var(--color-sys-primary);
++  --ghostty-preview-foreground: var(--cr-primary-text-color);
++}
++
++.ghostty-theme-preview-auto .ghostty-theme-preview-swatches i:nth-child(1) {
++  --ghostty-preview-swatch: var(--color-sys-surface);
++}
++
++.ghostty-theme-preview-auto .ghostty-theme-preview-swatches i:nth-child(2) {
++  --ghostty-preview-swatch: var(--color-sys-error);
++}
++
++.ghostty-theme-preview-auto .ghostty-theme-preview-swatches i:nth-child(3) {
++  --ghostty-preview-swatch: #34a853;
++}
++
++.ghostty-theme-preview-auto .ghostty-theme-preview-swatches i:nth-child(4) {
++  --ghostty-preview-swatch: #fbbc04;
++}
++
++.ghostty-theme-preview-auto .ghostty-theme-preview-swatches i:nth-child(5),
++.ghostty-theme-preview-auto .ghostty-theme-preview-swatches i:nth-child(7) {
++  --ghostty-preview-swatch: var(--color-sys-primary);
++}
++
++.ghostty-theme-preview-auto .ghostty-theme-preview-swatches i:nth-child(6) {
++  --ghostty-preview-swatch: #a142f4;
++}
++
++.ghostty-theme-preview-auto .ghostty-theme-preview-swatches i:nth-child(8) {
++  --ghostty-preview-swatch: var(--cr-primary-text-color);
++}
++
++.ghostty-theme-check {
++  --cr-icon-color: var(--color-sys-primary);
++  --cr-icon-size: 20px;
++  flex: 0 0 20px;
++}
++
++.ghostty-theme-check[hidden] {
++  visibility: hidden;
++}
++
++.ghostty-theme-message {
++  color: var(--cr-secondary-text-color);
++  font-weight: 400;
++  padding: 24px 16px;
++  text-align: center;
++}
++
++.ghostty-theme-error {
++  color: var(--color-sys-error);
++  padding: 8px 16px 12px;
++  text-align: start;
++}
++
++#ghosttyThemeList .sp-hr {
++  margin: 8px 16px;
++}
+diff --git a/chrome/browser/resources/side_panel/customize_chrome/app.html.ts b/chrome/browser/resources/side_panel/customize_chrome/app.html.ts
+index a0256ca7..cedea9aa 100644
+--- a/chrome/browser/resources/side_panel/customize_chrome/app.html.ts
++++ b/chrome/browser/resources/side_panel/customize_chrome/app.html.ts
+@@ -23,6 +23,14 @@ export function getHtml(this: AppElement) {
+       </customize-chrome-appearance>
+     </div>
+     <hr class="sp-cards-separator">
++    <cr-button id="cmuxAppearanceButton" class="section sp-card"
++        @click="${this.onCmuxAppearanceButtonClick_}">
++      <sp-heading hide-back-button>
++        <h2 slot="heading">Ghostty themes</h2>
++      </sp-heading>
++      <cr-icon icon="cr:chevron-right" slot="suffix-icon"></cr-icon>
++    </cr-button>
++    <hr class="sp-cards-separator">
+     <cr-button id="toolbarButton" class="section sp-card"
+         @click="${this.onToolbarCustomizationButtonClick_}">
+       <sp-heading hide-back-button id="toolbar-customization-heading">
+@@ -115,6 +123,107 @@ export function getHtml(this: AppElement) {
+   ` : ''}
+   <customize-chrome-toolbar @back-click="${this.onBackClick_}"
+       page-name="toolbar" id="toolbarPage"></customize-chrome-toolbar>
++  <div page-name="ghostty-themes" id="ghosttyThemesPage">
++    <div class="sp-card" id="ghosttyThemesCard">
++      <sp-heading id="ghosttyThemesHeading"
++          @back-button-click="${this.onGhosttyThemesBackButtonClick_}"
++          back-button-aria-label="$i18n{backButton}"
++          back-button-title="$i18n{backButton}">
++        <h2 slot="heading">Ghostty themes</h2>
++      </sp-heading>
++      <p class="ghostty-theme-intro">
++        Choose a bundled Ghostty theme for cmux, including the browser,
++        terminal, toolbar, and New Tab page.
++      </p>
++      ${this.ghosttyThemesLoading_ ? html`
++        <div class="ghostty-theme-message" role="status">
++          Loading themes…
++        </div>
++      ` : html`
++        <cr-search-field id="ghosttyThemeSearch"
++            label="Search Ghostty themes" clear-label="Clear search"
++            @search-changed="${this.onGhosttyThemeSearchChanged_}">
++        </cr-search-field>
++        <div id="ghosttyThemeCount" aria-live="polite">
++          Showing ${this.getFilteredGhosttyThemes_().length} of
++          ${this.ghosttyThemes_.length} bundled themes
++        </div>
++        ${this.ghosttyThemeError_ ? html`
++          <div class="ghostty-theme-message ghostty-theme-error" role="alert">
++            ${this.ghosttyThemeError_}
++          </div>
++        ` : ''}
++        <div id="ghosttyThemeList" role="radiogroup"
++            aria-label="Ghostty themes">
++          <label class="ghostty-theme-option ghostty-theme-follow">
++            <input class="ghostty-theme-radio" type="radio"
++                name="ghostty-theme" value=""
++                .checked="${this.selectedGhosttyTheme_ === ''}"
++                @change="${this.getGhosttyThemeSelectHandler_('')}">
++            <span class="ghostty-theme-preview ghostty-theme-preview-auto"
++                aria-hidden="true">
++              <span class="ghostty-theme-preview-bar">
++                <i></i><i></i><i></i>
++              </span>
++              <span class="ghostty-theme-preview-command">
++                <b>›</b><i></i><em></em>
++              </span>
++              <span class="ghostty-theme-preview-swatches">
++                ${[0, 1, 2, 3, 4, 5, 6, 7].map(() => html`<i></i>`)}
++              </span>
++            </span>
++            <span class="ghostty-theme-option-copy">
++              <span class="ghostty-theme-name">Follow Ghostty config</span>
++              <span class="ghostty-theme-description">
++                Use the theme from your Ghostty configuration files
++              </span>
++            </span>
++            <cr-icon class="ghostty-theme-check" icon="cr:check"
++                ?hidden="${this.selectedGhosttyTheme_ !== ''}">
++            </cr-icon>
++          </label>
++          <hr class="sp-hr">
++          ${this.getFilteredGhosttyThemes_().map(theme => html`
++            <label class="ghostty-theme-option">
++              <input class="ghostty-theme-radio" type="radio"
++                  name="ghostty-theme" .value="${theme.name}"
++                  .checked="${theme.name === this.selectedGhosttyTheme_}"
++                  @change="${
++                      this.getGhosttyThemeSelectHandler_(theme.name)}">
++              <span class="ghostty-theme-preview" aria-hidden="true"
++                  style="${this.getGhosttyThemePreviewStyle_(theme)}">
++                <span class="ghostty-theme-preview-bar">
++                  <i></i><i></i><i></i>
++                </span>
++                <span class="ghostty-theme-preview-command">
++                  <b>›</b><i></i><em></em>
++                </span>
++                <span class="ghostty-theme-preview-swatches">
++                  ${theme.palette.map(color => html`
++                    <i style="--ghostty-preview-swatch: ${color}"></i>
++                  `)}
++                </span>
++              </span>
++              <span class="ghostty-theme-option-copy">
++                <span class="ghostty-theme-name">${theme.name}</span>
++                <span class="ghostty-theme-description">
++                  Terminal, browser, toolbar, and New Tab colors
++                </span>
++              </span>
++              <cr-icon class="ghostty-theme-check" icon="cr:check"
++                  ?hidden="${theme.name !== this.selectedGhosttyTheme_}">
++              </cr-icon>
++            </label>
++          `)}
++          ${this.getFilteredGhosttyThemes_().length === 0 ? html`
++            <div class="ghostty-theme-message">
++              No Ghostty themes match “${this.ghosttyThemeQuery_}”.
++            </div>
++          ` : ''}
++        </div>
++      `}
++    </div>
++  </div>
+ </cr-page-selector>
+ <!--_html_template_end_-->`;
+   // clang-format on
+diff --git a/chrome/browser/resources/side_panel/customize_chrome/appearance.ts b/chrome/browser/resources/side_panel/customize_chrome/appearance.ts
+index bfca83de..9fecd69f 100644
+--- a/chrome/browser/resources/side_panel/customize_chrome/appearance.ts
++++ b/chrome/browser/resources/side_panel/customize_chrome/appearance.ts
+@@ -129,10 +129,6 @@ export class AppearanceElement extends AppearanceElementBase {
+       this.apiProxy_.callbackRouter.setTheme.addListener(theme => {
+         this.theme_ = theme;
+       }),
+-      this.apiProxy_.callbackRouter.attachedTabStateUpdated.addListener(
+-          newTabPageType => {
+-            this.newTabPageType_ = newTabPageType;
+-          }),
+       this.apiProxy_.callbackRouter.setThemeEditable.addListener(
+           isThemeEditable => {
+             this.showEditTheme_ = isThemeEditable;
+diff --git a/chrome/browser/search/search.cc b/chrome/browser/search/search.cc
+index b475a78e..0a401c0b 100644
+--- a/chrome/browser/search/search.cc
++++ b/chrome/browser/search/search.cc
+@@ -95,17 +95,6 @@ enum NewTabURLState {
+   NEW_TAB_URL_MAX
+ };
+
+-const TemplateURL* GetDefaultSearchProviderTemplateURL(Profile* profile) {
+-  if (profile) {
+-    TemplateURLService* template_url_service =
+-        TemplateURLServiceFactory::GetForProfile(profile);
+-    if (template_url_service) {
+-      return template_url_service->GetDefaultSearchProvider();
+-    }
+-  }
+-  return nullptr;
+-}
+-
+ bool IsMatchingServiceWorker(const GURL& my_url, const GURL& document_url) {
+   // The origin should match.
+   if (!MatchesOrigin(my_url, document_url)) {
+@@ -142,20 +131,6 @@ bool IsNTPOrRelatedURLHelper(const GURL& url, Profile* profile) {
+                                     IsMatchingServiceWorker(url, new_tab_url));
+ }
+
+-bool IsURLAllowedForSupervisedUser(const GURL& url, Profile& profile) {
+-  if (!profile.IsChild()) {
+-    return true;
+-  }
+-
+-  supervised_user::SupervisedUserUrlFilteringService* url_filtering_service =
+-      supervised_user::SupervisedUserUrlFilteringServiceFactory::GetForProfile(
+-          &profile);
+-  if (url_filtering_service->GetFilteringBehavior(url).IsBlocked()) {
+-    return false;
+-  }
+-  return true;
+-}
+-
+ // Used to look up the URL to use for the New Tab page. Also tracks how we
+ // arrived at that URL so it can be logged with UMA.
+ struct NewTabURLDetails {
+@@ -174,37 +149,9 @@ struct NewTabURLDetails {
+ #if BUILDFLAG(IS_ANDROID)
+     const GURL local_url;
+ #else
+-    const bool default_is_google = DefaultSearchProviderIsGoogle(profile);
+-    const GURL local_url(default_is_google
+-                             ? chrome::ChromeUINewTabPageURLAsGURL()
+-                             : GURL(chrome::kChromeUINewTabPageThirdPartyURL));
+-    if (default_is_google) {
+-      return NewTabURLDetails(local_url, NEW_TAB_URL_VALID);
+-    }
++    const GURL local_url(chrome::kChromeUINewTabPageURL);
+ #endif
+-
+-    const TemplateURL* template_url =
+-        GetDefaultSearchProviderTemplateURL(profile);
+-    if (!profile || !template_url) {
+-      return NewTabURLDetails(local_url, NEW_TAB_URL_BAD);
+-    }
+-
+-    GURL search_provider_url(template_url->new_tab_url_ref().ReplaceSearchTerms(
+-        TemplateURLRef::SearchTermsArgs(std::u16string()),
+-        UIThreadSearchTermsData()));
+-
+-    if (!search_provider_url.is_valid()) {
+-      return NewTabURLDetails(local_url, NEW_TAB_URL_NOT_SET);
+-    }
+-    if (!search_provider_url.SchemeIsCryptographic()) {
+-      return NewTabURLDetails(local_url, NEW_TAB_URL_INSECURE);
+-    }
+-    if (!IsURLAllowedForSupervisedUser(search_provider_url,
+-                                       CHECK_DEREF(profile))) {
+-      return NewTabURLDetails(local_url, NEW_TAB_URL_BLOCKED);
+-    }
+-
+-    return NewTabURLDetails(search_provider_url, NEW_TAB_URL_VALID);
++    return NewTabURLDetails(local_url, NEW_TAB_URL_VALID);
+   }
+
+   const GURL url;
+diff --git a/chrome/browser/resources/new_tab_shared/customize_buttons/customize_buttons.css b/chrome/browser/resources/new_tab_shared/customize_buttons/customize_buttons.css
+index 35e37e91..43e41e87 100644
+--- a/chrome/browser/resources/new_tab_shared/customize_buttons/customize_buttons.css
++++ b/chrome/browser/resources/new_tab_shared/customize_buttons/customize_buttons.css
+@@ -49,11 +49,10 @@
+   --cr-button-height: 32px;
+   border: none;
+   border-radius: calc(.5 * var(--cr-button-height));
+-  box-shadow: 0 3px 6px rgba(0, 0, 0, .16), 0 1px 2px rgba(0, 0, 0, .23);
+   font-weight: 400;
+   min-width: 32px;
+-  padding-inline-end: 16px;
+-  padding-inline-start: 16px;
++  padding-inline-end: 0;
++  padding-inline-start: 8px;
+ }
+
+ :host(:not([show-shadow])) .customize-button {
+@@ -82,15 +81,8 @@
+   --iron-icon-height: 16px;
+ }
+
+-@media (max-width: 550px) {
+-  .customize-button {
+-    padding-inline-end: 0;
+-    padding-inline-start: 8px;
+-  }
+-
+-  .customize-text {
+-    display: none;
+-  }
++.customize-text {
++  display: none;
+ }
+
+ @media (max-width: 1110px) {
+diff --git a/chrome/browser/resources/new_tab_shared/customize_buttons/customize_buttons.html.ts b/chrome/browser/resources/new_tab_shared/customize_buttons/customize_buttons.html.ts
+index 84a8de21..8647969f 100644
+--- a/chrome/browser/resources/new_tab_shared/customize_buttons/customize_buttons.html.ts
++++ b/chrome/browser/resources/new_tab_shared/customize_buttons/customize_buttons.html.ts
+@@ -10,28 +10,11 @@ export function getHtml(this: CustomizeButtonsElement) {
+   // clang-format off
+   return html`<!--_html_template_start_-->
+ <div id="customizeButtons">
+-  ${this.showWallpaperSearchButton ? html`
+-    <cr-button id="wallpaperSearchButton"
+-        class="customize-button" @click="${this.onWallpaperSearchClick_}"
+-        title="$i18n{customizeThisPageWallpaperSearch}"
+-        aria-pressed="${this.showWallpaperSearch}">
+-      <cr-icon id="wallpaperSearchIcon" class="customize-icon"
+-          slot="prefix-icon" icon="ntp:sparkle"></cr-icon>
+-      <div id="wallpaperSearchText" class="customize-text"
+-          ?hidden="${this.showWallpaperSearch}">
+-        $i18n{wallpaperSearchButton}
+-      </div>
+-    </cr-button>
+-  ` : ''}
+   <cr-button id="customizeButton" class="customize-button"
+       @click="${this.onCustomizeClick_}" title="$i18n{customizeThisPage}"
+       aria-pressed="${this.showCustomize}">
+     <cr-icon class="customize-icon" slot="prefix-icon" icon="ntp:pencil">
+     </cr-icon>
+-    <div id="customizeText" class="customize-text"
+-        ?hidden="${!this.showCustomizeChromeText}">
+-      $i18n{customizeButton}
+-    </div>
+   </cr-button>
+ </div>
+ <!--_html_template_end_-->`;
+diff --git a/ui/gfx/monogram_utils.cc b/ui/gfx/monogram_utils.cc
+index cf4dadba..2ae48224 100644
+--- a/ui/gfx/monogram_utils.cc
++++ b/ui/gfx/monogram_utils.cc
+@@ -25,7 +25,7 @@ void DrawCircleInCanvas(Canvas* canvas,
+   flags.setStyle(cc::PaintFlags::kFill_Style);
+   flags.setAntiAlias(true);
+   flags.setColor(background_color);
+-  int corner_radius = size / 2;
++  int corner_radius = 14;
+   canvas->DrawRoundRect(Rect(offset, offset, size, size), corner_radius, flags);
+ }
+
+diff --git a/ui/webui/resources/cr_components/most_visited/most_visited.css b/ui/webui/resources/cr_components/most_visited/most_visited.css
+index 131eacc6..e2ce6d33 100644
+--- a/ui/webui/resources/cr_components/most_visited/most_visited.css
++++ b/ui/webui/resources/cr_components/most_visited/most_visited.css
+@@ -15,7 +15,7 @@
+     --cr-tooltip-icon-fill-color: var(--cr-fallback-color-on-surface-subtle);
+   --icon-button-color-active: var(--google-grey-700);
+   --icon-button-color: var(--google-grey-600);
+-  --icon-size: 48px;
++  --icon-size: 46px;
+     --managed-tile-background-color: var(--cr-fallback-color-neutral-container);
+   --tile-background-color: rgb(229, 231, 232);
+   --tile-hover-color: rgba(var(--google-grey-900-rgb), .1);
+@@ -121,7 +121,7 @@
+ #showLess {
+   -webkit-tap-highlight-color: transparent;
+   align-items: center;
+-  border-radius: 4px;
++  border-radius: 10px;
+   box-sizing: border-box;
+   cursor: pointer;
+   display: flex;
+@@ -139,7 +139,7 @@
+ }
+
+ .tile a {
+-  border-radius: 4px;
++  border-radius: 10px;
+   display: inline-block;
+   height: 100%;
+   outline: none;
+@@ -187,7 +187,7 @@
+ .tile-icon {
+   align-items: center;
+   background-color: var(--tile-background-color);
+-  border-radius: 50%;
++  border-radius: 8px;
+   display: flex;
+   flex-shrink: 0;
+   height: var(--icon-size);
+@@ -197,8 +197,8 @@
+ }
+
+ .tile-icon img {
+-  height: 24px;
+-  width: 24px;
++  height: 30px;
++  width: 30px;
+ }
+
+ .managed-tile-icon {
+@@ -221,7 +221,6 @@ cr-policy-indicator {
+
+ .tile-title {
+   align-items: center;
+-  border-radius: calc(var(--title-height) / 2 + 2px);
+   color: var(--most-visited-text-color);
+   display: flex;
+   height: var(--title-height);
+@@ -266,7 +265,7 @@ cr-icon-button {
+   --cr-icon-button-fill-color: var(--icon-button-color);
+   --cr-icon-button-size: 28px;
+   --cr-icon-button-transition: none;
+-  margin: 4px 2px;
++  margin: 4px 4px;
+   opacity: 0;
+   position: absolute;
+   right: 0;
+diff --git a/ui/webui/resources/cr_components/most_visited/most_visited.ts b/ui/webui/resources/cr_components/most_visited/most_visited.ts
+index d05a0595..7e6fba0e 100644
+--- a/ui/webui/resources/cr_components/most_visited/most_visited.ts
++++ b/ui/webui/resources/cr_components/most_visited/most_visited.ts
+@@ -725,7 +725,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
+
+   protected getFaviconUrl_(url: Url): string {
+     const faviconUrl = new URL('chrome://favicon2/');
+-    faviconUrl.searchParams.set('size', '24');
++    faviconUrl.searchParams.set('size', '128');
+     faviconUrl.searchParams.set('scaleFactor', '1x');
+     faviconUrl.searchParams.set('showFallbackMonogram', '');
+     faviconUrl.searchParams.set('pageUrl', url);
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc b/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc
+index c978f8f2..190f9991 100644
+--- a/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc
+@@ -19,6 +19,9 @@
+ #include "build/build_config.h"
+ #include "chrome/browser/about_flags.h"
+ #include "chrome/browser/buildflags.h"
++#if !BUILDFLAG(IS_ANDROID)
++#include "chrome/browser/cmux_term/cmux_configure_page.h"
++#endif
+ #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
+ #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -159,6 +162,13 @@ WebUIController* NewWebUI(WebUI* web_ui, const GURL& url) {
+ // associated with it.
+ WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
+                                              const GURL& url) {
++#if !BUILDFLAG(IS_ANDROID)
++  if (url.SchemeIs(content::kChromeUIScheme) &&
++      url.host() == cmux::kCmuxConfigureChromeHost) {
++    return &NewWebUI<cmux::CmuxConfigureUI>;
++  }
++#endif
++
+   // This will get called a lot to check all URLs, so do a quick check of other
+   // schemes to filter out most URLs.
+ #if BUILDFLAG(ENABLE_DEVTOOLS_FRONTEND)
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+index 184305a4..5fdc3911 100644
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -7,6 +7,7 @@
+ #include "build/android_buildflags.h"
+ #include "build/branding_buildflags.h"
+ #include "build/build_config.h"
++#include "chrome/browser/cmux_term/cmux_configure_page.h"
+ #include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
+ #include "chrome/browser/glic/host/glic_ui.h"
+ #include "chrome/browser/optimization_guide/optimization_guide_internals_ui.h"
+@@ -252,6 +253,7 @@ void RegisterChromeWebUIConfigs() {
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+
+   auto& map = content::WebUIConfigMap::GetInstance();
++  cmux::RegisterCmuxConfigureWebUI();
+   map.AddWebUIConfig(std::make_unique<AccessibilityUIConfig>());
+   map.AddWebUIConfig(std::make_unique<AutofillInternalsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<BluetoothInternalsUIConfig>());

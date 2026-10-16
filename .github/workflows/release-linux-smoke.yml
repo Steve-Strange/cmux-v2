@@ -1,0 +1,449 @@
+name: verify Linux nightly artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Workflow run containing cmux-linux-nightly-release
+        required: true
+        type: string
+      expected_version:
+        description: Release version embedded in the artifact
+        required: true
+        type: string
+      expected_source_sha:
+        description: Reviewed cmux-browser commit used by the release run
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  linux-x64-smoke:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
+    env:
+      EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: cmux-linux-nightly-release
+          path: candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+      - name: Install virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils \
+            x11-utils \
+            xauth \
+            xvfb
+      - name: Verify checksums, provenance, source receipt, and update signature
+        run: |
+          set -euo pipefail
+          (
+            cd candidate
+            sha256sum --check SHA256SUMS
+          )
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import zipfile
+
+          root = Path("candidate")
+          expected_sha = os.environ["EXPECTED_SOURCE_SHA"]
+          expected_version = os.environ["EXPECTED_VERSION"]
+          expected_run_url = (
+              "https://github.com/manaflow-ai/cmux-browser/actions/runs/"
+              + os.environ["SOURCE_RUN_ID"]
+          )
+
+          metadata = json.loads(
+              (root / "RELEASE-METADATA.json").read_text(encoding="utf-8")
+          )
+          assert metadata == {
+              "channel": "nightly",
+              "release_tag": "nightly",
+              "run_url": expected_run_url,
+              "source_repository": "manaflow-ai/cmux-browser",
+              "source_sha": expected_sha,
+              "version": expected_version,
+          }
+
+          source_archives = list(
+              root.glob(f"cmux-browser-source-{expected_version}.tar.zst")
+          )
+          assert len(source_archives) == 1
+          receipt = json.loads(
+              (root / "corresponding-source.json").read_text(encoding="utf-8")
+          )
+          assert receipt["schema"] == 1
+          assert receipt["license"] == "GPL-3.0-only"
+          assert receipt["license_scope"] == {
+              "combined_work": "GPL-3.0-only",
+              "cmux_authored_material": "GPL-3.0-or-later",
+              "helium_derived_material": "GPL-3.0-only",
+          }
+          assert receipt["source"]["repository"] == "manaflow-ai/cmux-browser"
+          assert receipt["source"]["commit"] == expected_sha
+
+          statement = json.loads(
+              (root / "provenance.intoto.jsonl").read_text(encoding="utf-8")
+          )
+          assert statement["_type"] == "https://in-toto.io/Statement/v1"
+          assert statement["predicateType"] == "https://slsa.dev/provenance/v1"
+          dependency = statement["predicate"]["buildDefinition"][
+              "resolvedDependencies"
+          ][0]
+          assert dependency["uri"] == (
+              "git+https://github.com/manaflow-ai/cmux-browser@" + expected_sha
+          )
+          assert dependency["digest"]["gitCommit"] == expected_sha
+          for subject in statement["subject"]:
+              artifact = root / subject["name"]
+              assert artifact.is_file(), subject["name"]
+              digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+              assert digest == subject["digest"]["sha256"], subject["name"]
+
+          envelope = json.loads(
+              (root / "update.json").read_text(encoding="utf-8")
+          )
+          payload_bytes = base64.b64decode(envelope["payload"], validate=True)
+          signature_bytes = base64.b64decode(
+              envelope["signature"], validate=True
+          )
+          payload = json.loads(payload_bytes)
+          assert payload["schema"] == 1
+          assert payload["version"] == expected_version
+          assert set(payload["platforms"]) == {"linux-x64"}
+          linux = payload["platforms"]["linux-x64"]
+          update_zip = root / "cmux-linux-x64.zip"
+          assert linux["url"] == (
+              "https://github.com/manaflow-ai/cmux-v2/releases/download/"
+              "nightly/cmux-linux-x64.zip"
+          )
+          assert linux["archive_root"] == "cmux-browser"
+          assert linux["executable"] == "chrome"
+          assert linux["size"] == str(update_zip.stat().st_size)
+          assert linux["sha256"] == hashlib.sha256(
+              update_zip.read_bytes()
+          ).hexdigest()
+          with zipfile.ZipFile(update_zip) as archive:
+              names = set(archive.namelist())
+              assert "cmux-browser/chrome" in names
+              assert "cmux-browser/cmux-tui" in names
+              assert "cmux-browser/cmux-tui.REVISION" in names
+              assert "cmux-browser/cmux-tui.GHOSTTY_REVISION" in names
+              assert (
+                  "cmux-browser/"
+                  "cmux-tui.GHOSTTY_RESOURCES_MANIFEST.sha256"
+              ) in names
+              assert "cmux-browser/cmux-update-feed-url" in names
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+          (temp / "cmux-update-payload.json").write_bytes(payload_bytes)
+          (temp / "cmux-update-signature.der").write_bytes(signature_bytes)
+          PY
+          openssl dgst -sha256 \
+            -verify docs/update-public-key.pem \
+            -signature "$RUNNER_TEMP/cmux-update-signature.der" \
+            "$RUNNER_TEMP/cmux-update-payload.json"
+      - name: Install, launch, and replace the Linux nightly
+        run: |
+          set -euo pipefail
+          smoke="$RUNNER_TEMP/cmux-linux-smoke"
+          mkdir -p "$smoke/home/bin" "$smoke/home/share"
+          install_candidate() {
+            HOME="$smoke/home" \
+            XDG_BIN_HOME="$smoke/home/bin" \
+            XDG_DATA_HOME="$smoke/home/share" \
+            CMUX_INSTALL_DIR="$smoke/install" \
+            CMUX_LINUX_INSTALLER_NO_LAUNCH=1 \
+              sh candidate/cmux-linux-x64-installer.run
+          }
+          install_candidate
+          test -x "$smoke/install/chrome"
+          test -x "$smoke/install/cmux-tui"
+          ghostty_exports="$(
+            nm -D --defined-only "$smoke/install/chrome" |
+              awk '$3 ~ /^cmux_ghostty_/ { print $3 }'
+          )"
+          if [ -n "$ghostty_exports" ]; then
+            echo "bundled Ghostty symbols escaped into chrome's dynamic exports" >&2
+            printf '%s\n' "$ghostty_exports" >&2
+            exit 1
+          fi
+          test "$(readlink "$smoke/home/bin/cmux-browser-nightly")" = \
+            "$smoke/install/chrome"
+          grep -Fxq \
+            'https://github.com/manaflow-ai/cmux-v2/releases/download/nightly/update.json' \
+            "$smoke/install/cmux-update-feed-url"
+          version_output="$("$smoke/install/chrome" --version)"
+          case "$version_output" in
+            *"$EXPECTED_VERSION"*) ;;
+            *)
+              echo "unexpected browser version: $version_output" >&2
+              exit 1
+              ;;
+          esac
+          if ldd "$smoke/install/cmux-tui" | grep -Fq 'not found'; then
+            echo "cmux-tui has an unresolved shared library" >&2
+            ldd "$smoke/install/cmux-tui" >&2
+            exit 1
+          fi
+          cmux_revision="$(
+            tr -d '[:space:]' < "$smoke/install/cmux-tui.REVISION"
+          )"
+          ghostty_revision="$(
+            tr -d '[:space:]' < \
+              "$smoke/install/cmux-tui.GHOSTTY_REVISION"
+          )"
+          helper_version="$("$smoke/install/cmux-tui" --version)"
+          case "$helper_version" in
+            *"$cmux_revision"*"ghostty $ghostty_revision"*) ;;
+            *)
+              echo "unexpected cmux-tui version: $helper_version" >&2
+              exit 1
+              ;;
+          esac
+          (
+            cd "$smoke/install"
+            sha256sum --check \
+              cmux-tui.GHOSTTY_RESOURCES_MANIFEST.sha256
+          )
+          if ! HOME="$smoke/home" timeout 60 "$smoke/install/chrome" \
+              --headless \
+              --no-sandbox \
+              --disable-gpu \
+              --disable-dev-shm-usage \
+              --no-first-run \
+              --dump-dom 'data:text/html,<p>cmux-linux-smoke</p>' \
+              > "$smoke/headless.html" 2> "$smoke/headless.log"; then
+            echo "Chromium headless smoke failed" >&2
+            cat "$smoke/headless.log" >&2
+            exit 1
+          fi
+          grep -Fq '<p>cmux-linux-smoke</p>' "$smoke/headless.html"
+          # Chromium's verbose field-trial inventory contains the benign name
+          # PartitionAllocUnretainedDanglingPtr. Match the bracketed detector
+          # markers emitted for an actual dangling raw_ptr instead.
+          if grep -Eq \
+            'cmux-views|cmux-tui backend|\[DanglingPtr\]|\[DanglingSignature\]|core dumped' \
+            "$smoke/headless.log"; then
+            echo "cmux UI started or crashed during headless smoke" >&2
+            cat "$smoke/headless.log" >&2
+            exit 1
+          fi
+
+          mkdir -p "$smoke/gui-home"
+          Xvfb :99 -screen 0 1440x900x24 > "$smoke/xvfb.log" 2>&1 &
+          xvfb_pid=$!
+          export DISPLAY=:99
+          for _ in $(seq 1 50); do
+            xdpyinfo >/dev/null 2>&1 && break
+            sleep 0.1
+          done
+          xdpyinfo >/dev/null
+          cat > "$smoke/launch-gui.py" <<'PY'
+          import os
+          import sys
+
+          log_path, executable, *arguments = sys.argv[1:]
+          log_fd = os.open(
+              log_path,
+              os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_CLOEXEC,
+              0o600,
+          )
+          os.dup2(log_fd, 1)
+          os.dup2(log_fd, 2)
+          if log_fd not in (1, 2):
+              os.close(log_fd)
+          os.execv(executable, [executable, *arguments])
+          PY
+          browser_pid=
+          browser_is_live() {
+            local state
+            [ -n "${browser_pid:-}" ] || return 1
+            [ -r "/proc/$browser_pid/status" ] || return 1
+            state="$(
+              awk '$1 == "State:" { print $2; exit }' \
+                "/proc/$browser_pid/status"
+            )"
+            [ -n "$state" ] && [ "$state" != Z ]
+          }
+          report_gui_failure() {
+            echo "$1" >&2
+            if [ -r "/proc/${browser_pid:-missing}/status" ]; then
+              cat "/proc/$browser_pid/status" >&2
+            fi
+            cat "$smoke/gui.log" >&2
+          }
+          cleanup_gui() {
+            set +e
+            if [ -n "${browser_pid:-}" ]; then
+              kill -KILL "$browser_pid" 2>/dev/null || true
+              wait "$browser_pid" 2>/dev/null || true
+            fi
+            if [ -n "${xvfb_pid:-}" ]; then
+              kill -TERM "$xvfb_pid" 2>/dev/null || true
+              wait "$xvfb_pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup_gui EXIT
+          CMUX_TUI_BINARY="$smoke/install/cmux-tui" \
+          CMUX_TUI_EXPECTED_COMMIT="$cmux_revision" \
+          CMUX_TUI_EXPECTED_GHOSTTY_COMMIT="$ghostty_revision" \
+          HOME="$smoke/gui-home" \
+            python3 "$smoke/launch-gui.py" \
+            "$smoke/gui.log" "$smoke/install/chrome" \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --no-first-run \
+            --no-default-browser-check \
+            --user-data-dir="$smoke/gui-profile" \
+            --enable-logging=stderr \
+            --v=1 \
+            &
+          browser_pid=$!
+          gui_ready=0
+          for _ in $(seq 1 90); do
+            if ! browser_is_live; then
+              break
+            fi
+            if grep -Fq 'cmux-views: cmux-tui backend ready' \
+                 "$smoke/gui.log" &&
+               grep -Fq 'cmux-views: niri strip up' "$smoke/gui.log"; then
+              gui_ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$gui_ready" -ne 1 ]; then
+            report_gui_failure \
+              "cmux Linux GUI did not reach backend-ready state"
+            exit 1
+          fi
+          dwell_complete=1
+          for _ in $(seq 1 50); do
+            if ! browser_is_live; then
+              dwell_complete=0
+              break
+            fi
+            sleep 0.1
+          done
+          if ! browser_is_live; then
+            dwell_complete=0
+          fi
+          if [ "$dwell_complete" -ne 1 ]; then
+            report_gui_failure \
+              "cmux Linux GUI exited during its five-second dwell"
+            exit 1
+          fi
+          printf '%s\n' CMUX_LINUX_SMOKE_DWELL_COMPLETE >> "$smoke/gui.log"
+          if grep -Eq \
+            'cmux-tui backend unavailable|\[DanglingPtr\]|\[DanglingSignature\]|core dumped' \
+            "$smoke/gui.log"; then
+            report_gui_failure "cmux Linux GUI backend failed or crashed"
+            exit 1
+          fi
+          printf '%s\n' CMUX_LINUX_SMOKE_PRE_TERM >> "$smoke/gui.log"
+          pre_term_line="$(wc -l < "$smoke/gui.log")"
+          if ! kill -TERM "$browser_pid" 2>/dev/null; then
+            report_gui_failure \
+              "cmux Linux GUI disappeared before requested SIGTERM"
+            exit 1
+          fi
+          browser_stopped=0
+          for _ in $(seq 1 300); do
+            if ! browser_is_live; then
+              browser_stopped=1
+              break
+            fi
+            sleep 0.1
+          done
+          if [ "$browser_stopped" -ne 1 ]; then
+            report_gui_failure \
+              "cmux Linux GUI did not stop after SIGTERM"
+            exit 1
+          fi
+          set +e
+          wait "$browser_pid"
+          browser_status=$?
+          set -e
+          browser_pid=
+          if [ "$browser_status" -ne 0 ]; then
+            report_gui_failure \
+              "cmux Linux GUI exited with $browser_status instead of 0"
+            exit 1
+          fi
+          tail -n "+$((pre_term_line + 1))" "$smoke/gui.log" \
+            > "$smoke/post-term.log"
+          if ! grep -Fq 'Handling shutdown for signal 15.' \
+               "$smoke/post-term.log"; then
+            report_gui_failure \
+              "cmux Linux GUI did not handle SIGTERM after the marker"
+            exit 1
+          fi
+          kill -TERM "$xvfb_pid" 2>/dev/null || true
+          wait "$xvfb_pid" 2>/dev/null || true
+          xvfb_pid=
+          trap - EXIT
+          install_candidate
+          test -z "$(
+            find "$smoke" -maxdepth 1 -name '*.cmux-old.*' -print
+          )"
+      - name: Record the exact successfully smoked candidate
+        env:
+          RECEIPT_PATH: smoke-receipt/linux-nightly-smoke-receipt.json
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$RECEIPT_PATH")"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          checksums = Path("candidate/SHA256SUMS")
+          receipt = {
+              "artifact": {
+                  "name": "cmux-linux-nightly-release",
+                  "sha256sums_sha256": hashlib.sha256(
+                      checksums.read_bytes()
+                  ).hexdigest(),
+              },
+              "schema": 1,
+              "smoke_run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "smoke_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "smoke_workflow": (
+                  ".github/workflows/release-linux-smoke.yml"
+              ),
+              "smoke_workflow_sha": os.environ["GITHUB_SHA"],
+              "source_repository": os.environ["GITHUB_REPOSITORY"],
+              "source_run_id": int(os.environ["SOURCE_RUN_ID"]),
+              "source_sha": os.environ["EXPECTED_SOURCE_SHA"],
+              "version": os.environ["EXPECTED_VERSION"],
+          }
+          Path(os.environ["RECEIPT_PATH"]).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+      - name: Upload successful smoke receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmux-linux-nightly-smoke-receipt
+          path: smoke-receipt/linux-nightly-smoke-receipt.json
+          if-no-files-found: error
+          retention-days: 14

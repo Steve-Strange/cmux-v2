@@ -1,0 +1,159 @@
+From 782af9cb30a53f54487e5d2e44738645a8ec457c Mon Sep 17 00:00:00 2001
+From: Helium contributors <https://github.com/imputnet/helium>
+Date: Tue, 28 Jul 2026 00:00:00 -0700
+Subject: [PATCH] cmux: make the media toolbar button pane-hostable
+
+The visibility gate is adapted from Helium revision
+8030a8a3050151a141c06cc5a85f95cbbdc42a25:
+
+  patches/helium/ui/toolbar-button-prefs.patch
+
+cmux adds a Browser-based constructor because its pane-local toolbar has a
+real Browser but deliberately does not instantiate Chromium's BrowserView.
+The existing BrowserView entry point remains behaviorally identical.
+
+Helium is GPL-3.0-only; Chromium's original files are BSD-3-Clause. See
+third_party/helium/LICENSE and THIRD_PARTY_NOTICES.md.
+
+diff --git a/chrome/browser/ui/global_media_controls/media_toolbar_button_controller.cc b/chrome/browser/ui/global_media_controls/media_toolbar_button_controller.cc
+index b73f206..762c8bf 100644
+--- a/chrome/browser/ui/global_media_controls/media_toolbar_button_controller.cc
++++ b/chrome/browser/ui/global_media_controls/media_toolbar_button_controller.cc
+@@ -38,6 +38,16 @@ void MediaToolbarButtonController::OnMediaDialogClosed() {
+   delegate_->MaybeShowLocalMediaCastingPromo();
+ }
+
++void MediaToolbarButtonController::SetCanShowToolbarButton(
++    bool can_show_toolbar_button) {
++  if (can_show_toolbar_button_ == can_show_toolbar_button) {
++    return;
++  }
++
++  can_show_toolbar_button_ = can_show_toolbar_button;
++  UpdateToolbarButtonState();
++}
++
+ void MediaToolbarButtonController::ShowToolbarButton() {
+   if (delegate_display_state_ != DisplayState::kShown) {
+     delegate_->Show();
+@@ -47,6 +57,14 @@ void MediaToolbarButtonController::ShowToolbarButton() {
+ }
+
+ void MediaToolbarButtonController::UpdateToolbarButtonState() {
++  if (!can_show_toolbar_button_) {
++    if (delegate_display_state_ != DisplayState::kHidden) {
++      delegate_->Hide();
++    }
++    delegate_display_state_ = DisplayState::kHidden;
++    return;
++  }
++
+   if (item_manager_->HasActiveItems() || item_manager_->HasOpenDialog()) {
+     ShowToolbarButton();
+     return;
+diff --git a/chrome/browser/ui/global_media_controls/media_toolbar_button_controller.h b/chrome/browser/ui/global_media_controls/media_toolbar_button_controller.h
+index 87565ac..22d6a96 100644
+--- a/chrome/browser/ui/global_media_controls/media_toolbar_button_controller.h
++++ b/chrome/browser/ui/global_media_controls/media_toolbar_button_controller.h
+@@ -33,6 +33,7 @@ class MediaToolbarButtonController
+   void OnMediaDialogClosed() override;
+
+   void ShowToolbarButton();
++  void SetCanShowToolbarButton(bool can_show_toolbar_button);
+
+  private:
+   // Tracks the current display state of the toolbar button delegate.
+@@ -49,6 +50,7 @@ class MediaToolbarButtonController
+
+   // The delegate starts hidden and isn't shown until media playback starts.
+   DisplayState delegate_display_state_ = DisplayState::kHidden;
++  bool can_show_toolbar_button_ = true;
+ };
+
+ #endif  // CHROME_BROWSER_UI_GLOBAL_MEDIA_CONTROLS_MEDIA_TOOLBAR_BUTTON_CONTROLLER_H_
+diff --git a/chrome/browser/ui/views/global_media_controls/media_toolbar_button_view.cc b/chrome/browser/ui/views/global_media_controls/media_toolbar_button_view.cc
+index 1d4b9fe..b75dac6 100644
+--- a/chrome/browser/ui/views/global_media_controls/media_toolbar_button_view.cc
++++ b/chrome/browser/ui/views/global_media_controls/media_toolbar_button_view.cc
+@@ -44,15 +44,21 @@
+ MediaToolbarButtonView::MediaToolbarButtonView(
+     BrowserView* browser_view,
+     std::unique_ptr<MediaToolbarButtonContextualMenu> context_menu)
++    : MediaToolbarButtonView(browser_view->browser(),
++                             std::move(context_menu)) {}
++
++MediaToolbarButtonView::MediaToolbarButtonView(
++    Browser* browser,
++    std::unique_ptr<MediaToolbarButtonContextualMenu> context_menu)
+     : ToolbarButton(base::BindRepeating(&MediaToolbarButtonView::ButtonPressed,
+                                         base::Unretained(this)),
+                     context_menu ? context_menu->CreateMenuModel() : nullptr,
+                     /** tab_strip_model*/ nullptr,
+                     /** trigger_menu_on_long_press */ false),
+-      browser_(browser_view->browser()),
+-      service_(MediaNotificationServiceFactory::GetForProfile(
+-          browser_view->browser()->profile())),
++      browser_(browser),
++      service_(
++          MediaNotificationServiceFactory::GetForProfile(browser->profile())),
+       context_menu_(std::move(context_menu)) {
+   button_controller()->set_notify_action(
+       views::ButtonController::NotifyAction::kOnPress);
+   SetFlipCanvasOnPaintForRTLUI(false);
+@@ -109,13 +115,16 @@ void MediaToolbarButtonView::Enable() {
+   SetEnabled(true);
+
++  auto* const user_education =
++      BrowserUserEducationInterface::From(browser_);
++
+   // Have to check for browser window because this can be called during setup,
+   // before there is a valid widget to anchor anything to. Previously any
+   // attempt to display an IPH at this point would have simply failed, so this
+   // is not a behavioral change (see crbug.com/40212637).
+-  if (captions::IsLiveCaptionFeatureSupported()) {
+-    BrowserUserEducationInterface::From(browser_)->MaybeShowFeaturePromo(
++  if (captions::IsLiveCaptionFeatureSupported() && user_education) {
++    user_education->MaybeShowFeaturePromo(
+         feature_engagement::kIPHLiveCaptionFeature);
+   }
+
+   observers_.Notify(&MediaToolbarButtonObserver::OnMediaButtonEnabled);
+ }
+@@ -130,15 +139,19 @@ void MediaToolbarButtonView::Disable() {
+ }
+
+ void MediaToolbarButtonView::MaybeShowLocalMediaCastingPromo() {
+-  if (service_->should_show_cast_local_media_iph()) {
+-    BrowserUserEducationInterface::From(browser_)->MaybeShowFeaturePromo(
++  auto* const user_education =
++      BrowserUserEducationInterface::From(browser_);
++  if (service_->should_show_cast_local_media_iph() && user_education) {
++    user_education->MaybeShowFeaturePromo(
+         feature_engagement::kIPHGMCLocalMediaCastingFeature);
+   }
+ }
+
+ void MediaToolbarButtonView::MaybeShowStopCastingPromo() {
+-  if (service_->HasLocalCastNotifications()) {
+-    BrowserUserEducationInterface::From(browser_)->MaybeShowFeaturePromo(
++  auto* const user_education =
++      BrowserUserEducationInterface::From(browser_);
++  if (service_->HasLocalCastNotifications() && user_education) {
++    user_education->MaybeShowFeaturePromo(
+         feature_engagement::kIPHGMCCastStartStopFeature);
+   }
+ }
+diff --git a/chrome/browser/ui/views/global_media_controls/media_toolbar_button_view.h b/chrome/browser/ui/views/global_media_controls/media_toolbar_button_view.h
+index 4201484..5816543 100644
+--- a/chrome/browser/ui/views/global_media_controls/media_toolbar_button_view.h
++++ b/chrome/browser/ui/views/global_media_controls/media_toolbar_button_view.h
+@@ -24,6 +24,9 @@ class MediaToolbarButtonView : public ToolbarButton,
+   METADATA_HEADER(MediaToolbarButtonView, ToolbarButton)
+
+  public:
++  MediaToolbarButtonView(
++      Browser* browser,
++      std::unique_ptr<MediaToolbarButtonContextualMenu> context_menu);
+   MediaToolbarButtonView(
+       BrowserView* browser_view,
+       std::unique_ptr<MediaToolbarButtonContextualMenu> context_menu);

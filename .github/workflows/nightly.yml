@@ -1,0 +1,37 @@
+name: desktop nightly
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    if: vars.CMUX_RELEASES_ENABLED == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      value: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          base="$(tr -d '[:space:]' < .chromium-version)"
+          patch=$((${base##*.} + RUN_NUMBER))
+          [ "$patch" -le 65535 ] || { echo 'nightly patch overflow' >&2; exit 1; }
+          echo "value=${base%.*}.${patch}" >> "$GITHUB_OUTPUT"
+
+  build-and-publish:
+    if: vars.CMUX_RELEASES_ENABLED == 'true'
+    needs: version
+    uses: ./.github/workflows/release-build.yml
+    with:
+      version: ${{ needs.version.outputs.value }}
+      channel: nightly
+      release_tag: nightly
+    secrets: inherit

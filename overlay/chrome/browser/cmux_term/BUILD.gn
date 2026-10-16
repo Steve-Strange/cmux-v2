@@ -1,0 +1,108 @@
+# Copyright 2026 Manaflow, Inc.
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Isolated libghostty integration. The prebuilt static lib + headers are
+# copied into //third_party/cmux_ghostty by scripts/apply.sh. This source_set
+# carries the include path for compiling against ghostty.h and propagates the
+# static lib + its framework deps to whatever links it (the chrome binary)
+# via all_dependent_configs, so the giant chrome/browser target never needs
+# ghostty-specific gn edits.
+
+config("ghostty_public_config") {
+  include_dirs = [ "//third_party/cmux_ghostty/include" ]
+  defines = [ "GHOSTTY_STATIC" ]
+}
+
+# NOTE: the actual link of the prebuilt libghostty archive + its system
+# frameworks is attached directly to the chrome_dll shared library by
+# scripts/apply.sh, NOT propagated from here. Propagating link flags via
+# all_dependent_configs leaked them across the shared_library boundary into
+# the thin chrome_app executable, which both tripped the dylib verifier and
+# caused a PartitionAlloc "allocator loaded multiple times" abort at startup
+# (two images initializing the allocator). Keeping the link on chrome_dll
+# only leaves the executable libSystem-only.
+
+source_set("cmux_ghostty") {
+  sources = [
+    "cmux_ghostty.h",
+    "cmux_ghostty.mm",
+    "cmux_terminal_mouse_router.h",
+    "cmux_theme_ghostty.cc",
+    "cmux_theme_ghostty.h",
+  ]
+  configs += [ ":ghostty_public_config" ]
+  public_configs = [ ":ghostty_public_config" ]
+  deps = [
+    "//base",
+    "//chrome/services/cmux_terminal_renderer/public/cpp:ghostty_resources",
+    "//chrome/services/cmux_terminal_renderer/public/mojom",
+    "//content/public/browser",
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/cpp/platform",
+  ]
+}
+
+# Cross-platform cmux chrome UI: the pure layout model + the Views widgets that
+# render it (tab strip today; vertical-tab rail next). Depends ONLY on
+# //ui/views + friends and //base/skia/gfx -- NEVER on //chrome/browser, AppKit,
+# or any platform surface. This is the "cross-platform from day 1" boundary,
+# enforced by the build graph: nothing here can reach a platform dependency
+# without the build breaking. Both the cmux renderer and the standalone
+# cmux_ui_demo harness link this same source_set, so the UI is identical on
+# macOS / Windows / Linux. Chrome ColorIds are an optional runtime input: the
+# shipped browser resolves them through its Chrome mixers, while views_examples
+# detects unresolved placeholder colors and uses the rail's neutral/config
+# fallbacks. Do not pull //chrome/browser/ui/color:mixers into this target; it
+# carries browser themes, UI features, task-manager, and platform dependencies.
+source_set("cmux_chrome_ui") {
+  sources = [
+    "cmux_easing.cc",
+    "cmux_easing.h",
+    "cmux_keymap.cc",
+    "cmux_keymap.h",
+    "cmux_layout_config.cc",
+    "cmux_layout_config.h",
+    "cmux_native_window_registry.cc",
+    "cmux_native_window_registry.h",
+    "cmux_new_tab_page.h",
+    "cmux_pane.cc",
+    "cmux_pane.h",
+    "cmux_rail.cc",
+    "cmux_rail.h",
+    "cmux_rail_animating_layout_manager.cc",
+    "cmux_rail_animating_layout_manager.h",
+    "cmux_rail_config.cc",
+    "cmux_rail_config.h",
+    "cmux_sidebar_metrics.h",
+    "cmux_rail_group_editor_bubble.cc",
+    "cmux_rail_group_editor_bubble.h",
+    "cmux_rail_hover_card.cc",
+    "cmux_rail_hover_card.h",
+    "cmux_strip_view.cc",
+    "cmux_strip_view.h",
+    "cmux_tab_drag.cc",
+    "cmux_tab_drag.h",
+    "cmux_tab_strip.cc",
+    "cmux_tab_strip.h",
+    "cmux_terminal_host_connection.cc",
+    "cmux_terminal_host_connection.h",
+    "cmux_tui_protocol.cc",
+    "cmux_tui_protocol.h",
+    "cmux_workspace_projection.cc",
+    "cmux_workspace_projection.h",
+    "window_layout.cc",
+    "window_layout.h",
+    "window_model.cc",
+    "window_model.h",
+  ]
+  deps = [
+    "//base",
+    "//chrome/app/vector_icons",
+    "//chrome/services/cmux_terminal_renderer/public/cpp:terminal_host_protocol",
+    "//components/vector_icons",
+    "//skia",
+    "//ui/base",
+    "//ui/gfx",
+    "//ui/views",
+  ]
+}

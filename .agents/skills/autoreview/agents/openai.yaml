@@ -1,0 +1,7 @@
+interface:
+  display_name: "Auto Review"
+  short_description: "Review and fix cmux-browser changes safely"
+  default_prompt: "Use $autoreview to review the current cmux-browser changes, fix verified findings, and rerun until clean."
+
+policy:
+  allow_implicit_invocation: false

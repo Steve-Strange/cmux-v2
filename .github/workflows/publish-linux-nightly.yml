@@ -1,0 +1,125 @@
+name: publish verified Linux nightly
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful release-linux-nightly workflow run ID
+        required: true
+        type: string
+      smoke_run_id:
+        description: Successful release-linux-smoke workflow run ID
+        required: true
+        type: string
+      expected_version:
+        description: Four-part version in the verified release bundle
+        required: true
+        type: string
+      expected_source_sha:
+        description: Exact cmux-browser commit built and smoke-tested
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: cmux-nightly-release
+  cancel-in-progress: false
+
+jobs:
+  publish-linux-nightly:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 30
+    environment: release
+    env:
+      EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+      SMOKE_RUN_ID: ${{ inputs.smoke_run_id }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate inputs and fetch authoritative workflow run records
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+
+          for name in ("SOURCE_RUN_ID", "SMOKE_RUN_ID"):
+              value = os.environ[name]
+              assert re.fullmatch(r"[1-9][0-9]*", value), name
+          assert os.environ["SOURCE_RUN_ID"] != os.environ["SMOKE_RUN_ID"]
+          assert re.fullmatch(
+              r"[0-9]+(?:\.[0-9]+){3}", os.environ["EXPECTED_VERSION"]
+          )
+          assert re.fullmatch(
+              r"[0-9a-f]{40}", os.environ["EXPECTED_SOURCE_SHA"]
+          )
+          assert os.environ["GITHUB_REF"] == "refs/heads/main"
+          assert re.fullmatch(r"[0-9a-f]{40}", os.environ["GITHUB_SHA"])
+          PY
+          mkdir -p run-records
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
+            > run-records/source.json
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$SMOKE_RUN_ID" \
+            > run-records/smoke.json
+          smoke_workflow_sha="$(
+            python3 -c \
+              'import json; print(json.load(open("run-records/smoke.json"))["head_sha"])'
+          )"
+          [[ "$smoke_workflow_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh api \
+            "repos/$GITHUB_REPOSITORY/compare/${smoke_workflow_sha}...${GITHUB_SHA}" \
+            > run-records/smoke-to-publisher.json
+      - name: Download the exact Linux nightly release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: cmux-linux-nightly-release
+          path: candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+      - name: Download the successful smoke receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: cmux-linux-nightly-smoke-receipt
+          path: smoke-receipt
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.smoke_run_id }}
+      - name: Install corresponding-source verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zstd
+      - name: Reverify runs, checksums, source, license, provenance, and feed
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-linux-nightly-publication.py \
+            --bundle candidate \
+            --source-run run-records/source.json \
+            --smoke-run run-records/smoke.json \
+            --smoke-to-publisher run-records/smoke-to-publisher.json \
+            --smoke-receipt \
+              smoke-receipt/linux-nightly-smoke-receipt.json \
+            --public-key docs/update-public-key.pem \
+            --expected-version "$EXPECTED_VERSION" \
+            --expected-source-sha "$EXPECTED_SOURCE_SHA" \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --smoke-run-id "$SMOKE_RUN_ID" \
+            --publisher-sha "$GITHUB_SHA"
+      - name: Publish hidden draft only after exact asset verification
+        env:
+          CMUX_DISTRIBUTION_REPOSITORY: manaflow-ai/cmux-v2
+          CMUX_RELEASE_DIR: ${{ github.workspace }}/candidate
+          CMUX_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          CMUX_SMOKE_RUN_ID: ${{ inputs.smoke_run_id }}
+          CMUX_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          CMUX_VERSION: ${{ inputs.expected_version }}
+          GH_TOKEN: ${{ secrets.CMUX_RELEASE_REPO_TOKEN }}
+        run: ./scripts/publish-linux-nightly-release.sh

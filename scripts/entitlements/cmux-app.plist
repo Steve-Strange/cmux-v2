@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Tier 1 outer-app entitlements for ad-hoc signing.
+
+  Sources:
+  - Ghostty TCC set: /Users/lawrence/fun/ghostty/macos/Ghostty.entitlements
+  - Ghostty local release library-validation setting:
+    /Users/lawrence/fun/ghostty/macos/GhosttyReleaseLocal.entitlements
+  - Chromium unrestricted browser entitlements:
+    /Users/lawrence/chromium/src/chrome/app/app-entitlements.plist
+
+  Keep this file free of restricted Apple developer entitlements. Those are
+  reserved for Tier 2 Developer ID signing in cmux-app-restricted.plist.
+-->
+<plist version="1.0">
+<dict>
+	<!-- Ghostty.entitlements -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+
+	<!-- GhosttyReleaseLocal.entitlements; needed for local/vendor dylib loading. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+
+	<!-- Ghostty.entitlements and Chromium app-entitlements.plist -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.personal-information.location</key>
+	<true/>
+	<key>com.apple.security.personal-information.photos-library</key>
+	<true/>
+
+	<!-- Ghostty.entitlements -->
+	<key>com.apple.security.personal-information.addressbook</key>
+	<true/>
+	<key>com.apple.security.personal-information.calendars</key>
+	<true/>
+
+	<!-- Chromium app-entitlements.plist -->
+	<key>com.apple.security.device.bluetooth</key>
+	<true/>
+	<key>com.apple.security.device.print</key>
+	<true/>
+	<key>com.apple.security.device.usb</key>
+	<true/>
+</dict>
+</plist>

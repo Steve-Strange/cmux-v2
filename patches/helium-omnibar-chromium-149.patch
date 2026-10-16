@@ -1,0 +1,693 @@
+# Derived from Helium revisions 3d042e6224222e965e967e3038ef8a10380c89e2
+# and bee47818ed1f6a73790d46db74bf7324fee88799. Helium contributors retain
+# copyright. Modifications copyright 2026 Manaflow, Inc.
+# SPDX-License-Identifier: GPL-3.0-only
+# See third_party/helium/LICENSE and THIRD_PARTY_NOTICES.md.
+
+diff --git a/chrome/browser/ui/layout_constants.cc b/chrome/browser/ui/layout_constants.cc
+index 83002b2..8f46bae 100644
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -49,7 +49,7 @@ int GetLayoutConstant(LayoutConstant constant) {
+     case LayoutConstant::kLocationBarChildInteriorPadding:
+       return 3;
+     case LayoutConstant::kLocationBarChildCornerRadius:
+-      return 12;
++      return 6;
+     case LayoutConstant::kLocationBarChipIconSize:
+       return 16;
+     case LayoutConstant::kLocationBarChipPadding:
+@@ -57,19 +57,19 @@ int GetLayoutConstant(LayoutConstant constant) {
+     case LayoutConstant::kLocationBarElementPadding:
+       return touch_ui ? 3 : 2;
+     case LayoutConstant::kLocationBarPageInfoIconVerticalPadding:
+-      return touch_ui ? 3 : 5;
++      return touch_ui ? 3 : 2;
+     case LayoutConstant::kLocationBarTrailingDecorationEdgePadding:
+-      return touch_ui ? 3 : 12;
++      return touch_ui ? 3 : 2;
+     case LayoutConstant::kLocationBarTrailingDecorationInnerPadding:
+       return touch_ui ? 3 : 8;
+     case LayoutConstant::kLocationBarHeight:
+-      return touch_ui ? 36 : 34;
++      return touch_ui ? 36 : 28;
+     case LayoutConstant::kLocationBarIconSize:
+       return touch_ui ? 20 : 16;
+     case LayoutConstant::kLocationBarLeadingIconSize:
+       return GetLayoutConstant(LayoutConstant::kLocationBarIconSize);
+     case LayoutConstant::kLocationBarTrailingIconSize:
+-      return 20;
++      return 18;
+     case LayoutConstant::kNewTabButtonLeadingMargin:
+       return 0;
+     case LayoutConstant::kStarRatingIconSize:
+@@ -98,7 +98,7 @@ int GetLayoutConstant(LayoutConstant constant) {
+     case LayoutConstant::kTabstripToolbarOverlap:
+       return 1;
+     case LayoutConstant::kToolbarButtonHeight:
+-      return touch_ui ? 48 : 34;
++      return touch_ui ? 48 : 28;
+     case LayoutConstant::kToolbarButtonIconSize:
+       return touch_ui ? kDefaultTouchableIconSize
+                       : kDefaultIconSizeChromeRefresh;
+@@ -107,15 +107,15 @@ int GetLayoutConstant(LayoutConstant constant) {
+     case LayoutConstant::kToolbarDividerHeight:
+       return touch_ui ? 20 : 16;
+     case LayoutConstant::kToolbarDividerSpacing:
+-      return 9;
++      return 6;
+     case LayoutConstant::kToolbarDividerWidth:
+-      return 2;
++      return 1;
+     case LayoutConstant::kToolbarElementPadding:
+-      return touch_ui ? 0 : 4;
++      return touch_ui ? 0 : 3;
+     case LayoutConstant::kToolbarIconDefaultMargin:
+-      return touch_ui ? 0 : 2;
++      return touch_ui ? 0 : 3;
+     case LayoutConstant::kLocationBarMargin:
+-      return touch_ui ? 12 : 9;
++      return touch_ui ? 12 : 6;
+     case LayoutConstant::kToolbarHeightSidePanelInset:
+       return 8;
+     case LayoutConstant::kPageInfoIconSize:
+@@ -170,13 +170,13 @@ gfx::Insets GetLayoutInsets(LayoutInset inset) {
+       return gfx::Insets::VH(8, 20);
+
+     case LOCATION_BAR_ICON_INTERIOR_PADDING:
+-      return gfx::Insets::VH(2, 2);
++      return gfx::Insets::VH(2, 3);
+
+     case LOCATION_BAR_PAGE_INFO_ICON_PADDING:
+       return touch_ui ? gfx::Insets::VH(5, 10) : gfx::Insets::VH(4, 4);
+
+     case LOCATION_BAR_PAGE_ACTION_ICON_PADDING:
+-      return touch_ui ? gfx::Insets::VH(5, 10) : gfx::Insets::VH(2, 2);
++      return GetLayoutInsets(LOCATION_BAR_ICON_INTERIOR_PADDING);
+
+     case TOOLBAR_ACTION_VIEW: {
+       // TODO(afakhry): Unify all toolbar button sizes on all platforms.
+@@ -185,7 +185,7 @@ gfx::Insets GetLayoutInsets(LayoutInset inset) {
+     }
+
+     case TOOLBAR_BUTTON:
+-      return gfx::Insets(touch_ui ? 12 : 7);
++      return gfx::Insets(touch_ui ? 12 : 4);
+
+     case BROWSER_APP_MENU_CHIP_PADDING:
+       if (touch_ui) {
+@@ -201,11 +201,11 @@ gfx::Insets GetLayoutInsets(LayoutInset inset) {
+       if (touch_ui) {
+         return GetLayoutInsets(TOOLBAR_BUTTON);
+       } else {
+-        return gfx::Insets::TLBR(7, 10, 7, 4);
++        return gfx::Insets::TLBR(4, 5, 4, 4);
+       }
+
+     case TOOLBAR_INTERIOR_MARGIN:
+-      return touch_ui ? gfx::Insets::VH(4, 0) : gfx::Insets::VH(6, 6);
++      return touch_ui ? gfx::Insets::VH(4, 0) : gfx::Insets::VH(3, 6);
+
+     case WEBUI_TAB_STRIP_TOOLBAR_INTERIOR_MARGIN:
+       return gfx::Insets::VH(4, 0);
+diff --git a/chrome/browser/ui/views/location_bar/icon_label_bubble_view.cc b/chrome/browser/ui/views/location_bar/icon_label_bubble_view.cc
+index a5c48e6..4c62cf7 100644
+--- a/chrome/browser/ui/views/location_bar/icon_label_bubble_view.cc
++++ b/chrome/browser/ui/views/location_bar/icon_label_bubble_view.cc
+@@ -51,7 +51,7 @@ constexpr int kIconLabelBubbleSeparatorWidth = 1;
+
+ // Amount of space on either side of the separator that appears after the icon
+ // or label.
+-constexpr int kIconLabelBubbleSpaceBesideSeparator = 8;
++constexpr int kIconLabelBubbleSpaceBesideSeparator = 6;
+
+ // The length of the separator's fade animation. These values are empirical.
+ constexpr int kIconLabelBubbleFadeInDurationMs = 250;
+@@ -87,9 +87,7 @@ void IconLabelBubbleView::SeparatorView::OnPaint(gfx::Canvas* canvas) {
+   const SkColor separator_color = SkColorSetA(
+       owner_->delegate_->GetIconLabelBubbleSurroundingForegroundColor(),
+       owner_->delegate_->GetIconLabelBubbleSeparatorAlpha());
+-  const float x = GetLocalBounds().right() -
+-                  owner_->GetEndPaddingWithSeparator() -
+-                  1.0f / canvas->image_scale();
++  const float x = 0.5f;
+   canvas->DrawLine(gfx::PointF(x, GetLocalBounds().y()),
+                    gfx::PointF(x, GetLocalBounds().bottom()), separator_color);
+ }
+@@ -288,8 +286,7 @@ views::ProposedLayout IconLabelBubbleView::CalculateProposedLayout(
+   // value to be, since it won't be visible.
+   const int label_x = image_bounds_with_label.right() + GetInternalSpacing();
+   const int available_label_width =
+-      std::max(0, layout.host_size.width() - label_x - bubble_trailing_padding -
+-                      GetWidthBetweenIconAndSeparator());
++      std::max(0, layout.host_size.width() - label_x - bubble_trailing_padding);
+   gfx::Rect label_bounds(label_x, 0, available_label_width, height);
+   layout.child_layouts.emplace_back(
+       label(),
+@@ -312,10 +309,9 @@ views::ProposedLayout IconLabelBubbleView::CalculateProposedLayout(
+   gfx::Rect separator_bounds(label_bounds);
+   separator_bounds.Inset(
+       gfx::Insets::VH((separator_bounds.height() - separator_height) / 2, 0));
+-  float separator_width =
+-      GetWidthBetweenIconAndSeparator() + GetEndPaddingWithSeparator();
++  float separator_width = 2;
+   int separator_x =
+-      label()->GetText().empty() ? image_bounds.right() : label_bounds.right();
++      (label()->GetText().empty() ? image_bounds.right() : label_bounds.right()) + 2;
+
+   layout.child_layouts.emplace_back(
+       const_cast<views::View*>(this->separator_view()), ShouldShowSeparator(),
+@@ -627,7 +623,9 @@ gfx::RoundedCornersF IconLabelBubbleView::GetCornerRadii() const {
+   if (radii_.has_value()) {
+     return radii_.value();
+   }
+-  return gfx::RoundedCornersF(GetPreferredSize().height() / 2);
++
++  // location bar rounding is 8px and padding is 2px, so inner rounding is 6px
++  return gfx::RoundedCornersF(6.0f);
+ }
+
+ void IconLabelBubbleView::SetCornerRadii(const gfx::RoundedCornersF& radii) {
+@@ -820,12 +818,12 @@ SkPath IconLabelBubbleView::GetHighlightPath() const {
+   highlight_bounds = GetMirroredRect(highlight_bounds);
+
+   const SkRect rect = RectToSkRect(highlight_bounds);
+-  gfx::RoundedCornersF radii = GetCornerRadii();
+-  const SkVector sk_radii[4] = {{radii.upper_left(), radii.upper_left()},
+-                                {radii.upper_right(), radii.upper_right()},
+-                                {radii.lower_right(), radii.lower_right()},
+-                                {radii.lower_left(), radii.lower_left()}};
+-
++  const float layout_radius = static_cast<float>(
++      GetLayoutConstant(LayoutConstant::kLocationBarChildCornerRadius));
++  const SkVector sk_radii[4] = {{layout_radius, layout_radius},
++                                  {layout_radius, layout_radius},
++                                  {layout_radius, layout_radius},
++                                  {layout_radius, layout_radius}};
+   return SkPath::RRect(SkRRect::MakeRectRadii(rect, sk_radii));
+ }
+
+diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+index ab68a05..f09c311 100644
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+@@ -215,10 +215,10 @@ int IncrementalMinimumWidth(const views::View* view) {
+ }
+
+ // The padding between the intent chip and the other trailing decorations.
+-constexpr int kIntentChipIntraItemPadding = 12;
++constexpr int kIntentChipIntraItemPadding = 4;
+
+ // The padding between the content setting icons and other trailing decorations.
+-constexpr int kContentSettingIntraItemPadding = 8;
++constexpr int kContentSettingIntraItemPadding = kIntentChipIntraItemPadding;
+
+ }  // namespace
+
+@@ -264,7 +264,10 @@ LocationBarView::LocationBarView(Browser* browser,
+                  !v->GetOmniboxController()->IsPopupOpen();
+         }));
+     views::FocusRing::Get(this)->SetOutsetFocusRingDisabled(true);
+-    views::InstallPillHighlightPathGenerator(this);
++
++    // Same radius as the location bar.
++    views::InstallRoundRectHighlightPathGenerator(
++      this, gfx::Insets(), GetBorderRadius());
+
+ #if BUILDFLAG(OS_LEVEL_GEOLOCATION_PERMISSION_SUPPORTED)
+     if (features::IsOsLevelGeolocationPermissionSupportEnabled()) {
+@@ -324,9 +327,9 @@ void LocationBarView::Init() {
+       CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_PRIMARY);
+
+   const gfx::FontList& omnibox_chip_font_list = typography_provider.GetFont(
+-      CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_BODY_4_EMPHASIS);
++      CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_PRIMARY);
+   const gfx::FontList& page_action_font_list = typography_provider.GetFont(
+-      CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_BODY_3_EMPHASIS);
++      CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_PRIMARY);
+
+   auto location_icon_view =
+       std::make_unique<LocationIconView>(omnibox_chip_font_list, this, this);
+@@ -482,7 +485,7 @@ void LocationBarView::Init() {
+   // if all page actions (i.e. up to bookmark star) are migrated.
+   const bool should_bridge_containers =
+       !IsPageActionMigrated(PageActionIconType::kBookmarkStar);
+-  static constexpr int kBetweenIconSpacing = 8;
++  static constexpr int kBetweenIconSpacing = kIntentChipIntraItemPadding;
+   const page_actions::PageActionViewParams page_action_params{
+       .icon_size =
+           GetLayoutConstant(LayoutConstant::kLocationBarTrailingIconSize),
+@@ -621,7 +624,7 @@ int LocationBarView::GetBorderRadius() const {
+ // static
+ int LocationBarView::ComputeBorderRadius(gfx::Size size) {
+   return ChromeLayoutProvider::Get()->GetCornerRadiusMetric(
+-      views::Emphasis::kMaximum, size);
++      views::Emphasis::kHigh, size);
+ }
+
+ // static
+@@ -840,9 +843,9 @@ void LocationBarView::Layout(PassKey) {
+   // TODO(manukh): Move constants to layout_constants.cc.
+   // The padding between the left edges of the location bar and the LHS icon,
+   // e.g. the page info icon, the google G icon, the selected suggestion icon.
+-  int icon_left = 5;
++  int icon_left = 2;
+   // The padding between the LHS icon and the text.
+-  int text_left = 8;
++  int text_left = 5;
+
+   // Apply indentation to align the omnibox input icon and the text with those
+   // of the suggestions in the popup. However, there are two exceptions where
+@@ -861,22 +864,22 @@ void LocationBarView::Layout(PassKey) {
+                              !location_icon_view_->ShouldShowLabel() &&
+                              !ShouldShowKeywordBubble();
+   if (should_indent) {
+-    icon_left += 7 /*icon_indent*/;
++    icon_left += 0 /*icon_indent*/;
+     icon_left += omnibox_feature_configs::AdjustOmniboxIndent()
+                      .Get()
+                      .input_icon_indent_offset;
+-    text_left += 6 /*text_indent*/;
++    text_left += 0 /*text_indent*/;
+     text_left += omnibox_feature_configs::AdjustOmniboxIndent()
+                      .Get()
+                      .input_text_indent_offset;
+   } else if (ShouldShowKeywordBubble()) {
+     // Otherwise, if in keyword mode, adjust indentation to align the icon and
+     // the text with the suggestion icons & texts.
+-    icon_left += 9; /*icon_indent_keyword_mode*/
++    icon_left += 0; /*icon_indent_keyword_mode*/
+     icon_left += omnibox_feature_configs::AdjustOmniboxIndent()
+                      .Get()
+                      .input_icon_indent_offset;
+-    text_left += -9; /*text_indent_keyword_mode*/
++    text_left += 0; /*text_indent_keyword_mode*/
+   }
+
+   LocationBarLayout leading_decorations(LocationBarLayout::Position::kLeftEdge,
+@@ -1547,7 +1550,7 @@ int LocationBarView::GetMinimumTrailingWidth() const {
+ }
+
+ gfx::Rect LocationBarView::GetLocalBoundsWithoutEndcaps() const {
+-  const int border_radius = height() / 2;
++  const int border_radius = GetBorderRadius();
+   gfx::Rect bounds_without_endcaps(GetLocalBounds());
+   bounds_without_endcaps.Inset(gfx::Insets::VH(0, border_radius));
+   return bounds_without_endcaps;
+diff --git a/chrome/browser/ui/views/location_bar/location_icon_view.cc b/chrome/browser/ui/views/location_bar/location_icon_view.cc
+index a47529d..048c897 100644
+--- a/chrome/browser/ui/views/location_bar/location_icon_view.cc
++++ b/chrome/browser/ui/views/location_bar/location_icon_view.cc
+@@ -114,7 +114,7 @@ SkColor LocationIconView::GetForegroundColor() const {
+ }
+
+ bool LocationIconView::ShouldShowSeparator() const {
+-  return false;
++  return ShouldShowLabel();
+ }
+
+ bool LocationIconView::ShouldShowLabelAfterAnimation() const {
+@@ -409,7 +409,8 @@ gfx::Size LocationIconView::GetMinimumSizeForPreferredSize(
+ }
+
+ void LocationIconView::SetBackgroundColor(SkColor color) {
+-  SetBackground(views::CreateRoundedRectBackground(color, GetCornerRadii()));
++  SetBackground(views::CreateRoundedRectBackground(SK_ColorTRANSPARENT,
++      GetCornerRadii()));
+ }
+
+ BEGIN_METADATA(LocationIconView)
+diff --git a/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.cc b/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.cc
+index d73ecda..86874a3 100644
+--- a/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.cc
+@@ -60,9 +60,6 @@ static constexpr int kUniformRowHeightIconSize = 28;
+ // since the text will have to be further right to accommodate the icons.
+ static constexpr int kIphTextIndent = 14;
+
+-// The extra space added to the left-side inset of the toolbelt suggestion.
+-static constexpr int kToolbeltTextInsetLeft = 12;
+-
+ // The right-side inset of the toolbelt suggestion.
+ static constexpr int kToolbeltTextInsetRight = 8;
+
+@@ -349,40 +346,7 @@ void OmniboxMatchCellView::OnMatchUpdate(const OmniboxResultView* result_view,
+
+ void OmniboxMatchCellView::SetIcon(const gfx::ImageSkia& image,
+                                    const AutocompleteMatch& match) {
+-  const bool is_pedal_suggestion_row =
+-      match.type == AutocompleteMatchType::PEDAL;
+-  const bool is_journeys_suggestion_row =
+-      match.type == AutocompleteMatchType::HISTORY_CLUSTER;
+-  const bool is_instant_keyword_row =
+-      AutocompleteMatch::IsFeaturedSearchType(match.type);
+-  bool should_draw_icon_background = is_pedal_suggestion_row ||
+-                                     is_journeys_suggestion_row ||
+-                                     is_instant_keyword_row;
+-
+-  // Do not apply the distinctive background color to the open lens action when
+-  // the UI tweaks are enabled.
+-  if (match.HasTakeoverAction(OmniboxActionId::CONTEXTUAL_SEARCH_OPEN_LENS) &&
+-      omnibox_feature_configs::ContextualSearch::Get().open_lens_action_ui_tweaks) {
+-    should_draw_icon_background = false;
+-  }
+-
+-  if (should_draw_icon_background) {
+-    // When a PEDAL suggestion has been split out to its own row, apply a square
+-    // background with a distinctive color to the respective icon. Journeys
+-    // suggestion rows should also receive the same treatment.
+-    const auto background_color = is_pedal_suggestion_row ||
+-                                          is_journeys_suggestion_row ||
+-                                          is_instant_keyword_row
+-                                      ? kColorOmniboxAnswerIconGM3Background
+-                                      : kColorOmniboxResultsIconGM3Background;
+-    icon_view_->SetImage(ui::ImageModel::FromImageSkia(
+-        gfx::ImageSkiaOperations::CreateImageWithRoundRectBackground(
+-            gfx::SizeF(kUniformRowHeightIconSize, kUniformRowHeightIconSize),
+-            kIconAndImageCornerRadius,
+-            GetColorProvider()->GetColor(background_color), image)));
+-  } else {
+     icon_view_->SetImage(ui::ImageModel::FromImageSkia(image));
+-  }
+ }
+
+ void OmniboxMatchCellView::ClearIcon() {
+@@ -590,7 +554,7 @@ gfx::Size OmniboxMatchCellView::CalculatePreferredSize(
+   } else if (layout_style_ == LayoutStyle::IPH_SUGGESTION ||
+              layout_style_ == LayoutStyle::TOOLBELT) {
+     // IPH and toolbelt suggestions have extra height.
+-    height = kRowHeight + 4;
++    height = kRowHeight;
+   } else {
+     // The height for traditional 1-line matches.
+     height = kRowHeight;
+@@ -611,7 +575,7 @@ int OmniboxMatchCellView::GetImageIndent() const {
+   // not derived from other matches' `indent` below.
+   if (layout_style_ == LayoutStyle::IPH_SUGGESTION ||
+       layout_style_ == LayoutStyle::TOOLBELT) {
+-    return 2;
++    return -3;
+   }
+
+   // The entity, answer, and icon images are horizontally centered within their
+@@ -622,7 +586,7 @@ int OmniboxMatchCellView::GetImageIndent() const {
+   // b) Entities, answers, and icons continue to be center-aligned.
+   // c) Regardless of the state of those other features and their widths.
+   // This applies to both touch-UI and non-touch-UI.
+-  int indent = 16 + kUniformRowHeightIconSize / 2 - kImageBoundsWidth / 2;
++  int indent = 3 + kUniformRowHeightIconSize / 2 - kImageBoundsWidth / 2;
+
+   indent += omnibox_feature_configs::AdjustOmniboxIndent()
+                 .Get()
+@@ -632,51 +596,7 @@ int OmniboxMatchCellView::GetImageIndent() const {
+ }
+
+ int OmniboxMatchCellView::GetTextIndent() const {
+-  // Text indent is added to the `OmniboxMatchCellView::GetInsets()`. It is not
+-  // added to the image position & size.
+-
+-  // Toolbelt layout is similar to IPH and has a custom indent.
+-  if (layout_style_ == LayoutStyle::TOOLBELT) {
+-    return kToolbeltTextInsetLeft;
+-  }
+-
+-  // Some IPH matches have no icons. They should be moved further left so the
+-  // gap between the IPH background and the start of the IPH text isn't jarring.
+-  // Non-IPH matches without icons (e.g. the 'no results found' tab match) don't
+-  // want to apply this left shift because their text needs to align with the
+-  // other matches' and the omnibox's texts. This number is independent of other
+-  // layout numbers; i.e., it's not meant to align with other UI; it's just
+-  // arbitrarily chosen by UX. Hence, it's not derived from other matches'
+-  // `indent` below.
+-  if (layout_style_ == LayoutStyle::IPH_SUGGESTION &&
+-      icon_view_->GetPreferredSize() == gfx::Size{}) {
+-    return kIphTextIndent;
+-  }
+-
+-  // Answers don't have an icon, and their text needs to line up with the icons
+-  // of other suggestions, so they need a smaller indent.
+-  if (layout_style_ == LayoutStyle::HISTORY_EMBEDDING_ANSWER) {
+-    return 18;
+-  }
+-
+-  // For normal matches, the gap between the left edge of this view and the
+-  // left edge of its favicon or answer image.
+-  int indent = 52;
+-
+-  indent += omnibox_feature_configs::AdjustOmniboxIndent()
+-                .Get()
+-                .match_text_indent_offset;
+-
+-  if (layout_style_ == LayoutStyle::IPH_SUGGESTION) {
+-    // The IPH row left inset is +`kIphOffset` from other suggestions, so the
+-    // text indent should be -`kIphOffset` to keep the text aligned. IPH matches
+-    // seem to have inner padding, so the gap between the left edge of this
+-    // `OmniboxMatchCellView` and the IPH icon/text is actually larger than
+-    // `indent`.
+-    indent -= kIphOffset;
+-  }
+-
+-  return indent;
++  return 30;
+ }
+
+ void OmniboxMatchCellView::SetTailSuggestCommonPrefixWidth(
+diff --git a/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.h b/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.h
+index c4e367c..32b8557 100644
+--- a/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.h
++++ b/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.h
+@@ -34,7 +34,7 @@ class OmniboxMatchCellView : public views::View {
+
+   // The height of the standard 1-line match row. Multiline & IPH matches have
+   // larger heights.
+-  static constexpr int kRowHeight = 40;
++  static constexpr int kRowHeight = 28;
+
+   // The width of icon, answer, and entity image bounds. These images are
+   // smaller than this bounds; they'll be centered within the bounds.
+diff --git a/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc b/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
+index ca04874..e81432d 100644
+--- a/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
+@@ -694,14 +694,7 @@ gfx::Rect OmniboxPopupViewViews::GetTargetBounds() const {
+   // added if the results section has no height (result set is empty or all
+   // results are hidden). See https://crbug.com/1076646 for additional context.
+   if (popup_height != 0) {
+-    // The amount of extra space is dependent on whether the last match is the
+-    // toolbelt or not. The toolbelt doesn't have an icon or image on the left
+-    // like a regular suggestion nor a big background highlight like an IPH
+-    // suggestion so it doesn't require as much space.
+-    const size_t last_result_index = result_size - 1;
+-    int extra_bottom_padding =
+-        GetMatchAtIndex(last_result_index).IsToolbelt() ? 2 : 8;
+-    popup_height += extra_bottom_padding;
++    popup_height += 4;
+   }
+
+   // Add enough space on the top and bottom so it looks like there is the same
+diff --git a/chrome/browser/ui/views/omnibox/omnibox_result_view.cc b/chrome/browser/ui/views/omnibox/omnibox_result_view.cc
+index c58e8df..08f3548 100644
+--- a/chrome/browser/ui/views/omnibox/omnibox_result_view.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_result_view.cc
+@@ -195,9 +195,6 @@ OmniboxResultView::OmniboxResultView(OmniboxPopupViewViews* popup_view,
+
+   SetLayoutManager(std::make_unique<views::FillLayout>());
+
+-  selection_indicator_ =
+-      AddChildView(std::make_unique<OmniboxResultSelectionIndicator>());
+-
+   local_answer_header_and_suggestion_and_buttons_ =
+       AddChildView(std::make_unique<views::View>());
+   local_answer_header_and_suggestion_and_buttons_
+@@ -298,8 +295,9 @@ OmniboxResultView::OmniboxResultView(OmniboxPopupViewViews* popup_view,
+               &OmniboxResultView::ButtonPressed, base::Unretained(this),
+               OmniboxPopupSelection::FOCUSED_BUTTON_REMOVE_SUGGESTION)));
+   remove_suggestion_button_->SetProperty(views::kMarginsKey,
+-                                         gfx::Insets::TLBR(0, 0, 0, 16));
+-  views::InstallCircleHighlightPathGenerator(remove_suggestion_button_);
++                                         gfx::Insets::TLBR(0, 0, 0, 4));
++  views::InstallRoundRectHighlightPathGenerator(remove_suggestion_button_,
++                                                gfx::Insets::VH(1, 1), 5);
+   auto* const remove_focus_ring =
+       views::FocusRing::Get(remove_suggestion_button_);
+   remove_focus_ring->SetHasFocusPredicate(base::BindRepeating(
+@@ -352,10 +350,9 @@ std::unique_ptr<views::Background> OmniboxResultView::GetPopupCellBackground(
+         /*for_border_thickness=*/0);
+   }
+
+-  const float half_row_height = OmniboxMatchCellView::kRowHeight / 2;
+-  gfx::RoundedCornersF radii = {0, half_row_height, half_row_height, 0};
+   return views::CreateRoundedRectBackground(
+-      GetOmniboxBackgroundColorId(part_state), radii);
++      GetOmniboxBackgroundColorId(part_state),
++          kIPHBackgroundBorderRadius);
+ }
+
+ void OmniboxResultView::SetMatch(const AutocompleteMatch& match) {
+@@ -500,22 +497,6 @@ void OmniboxResultView::ApplyThemeAndRefreshIcons(bool force_reapply_styles) {
+
+   button_row_->SetThemeState(GetThemeState());
+
+-  // The selection indicator indicates when the suggestion is focused. Do not
+-  // show the selection indicator if an auxiliary button is selected.
+-  if (match_.HasInstantKeyword(
+-          popup_view_->controller()->client()->GetTemplateURLService())) {
+-    const OmniboxPopupSelection::LineState line_state =
+-        popup_view_->GetSelection().state;
+-    selection_indicator_->SetVisible(
+-        selected &&
+-        (line_state == OmniboxPopupSelection::LineState::NORMAL ||
+-         line_state == OmniboxPopupSelection::LineState::KEYWORD_MODE));
+-  } else {
+-    selection_indicator_->SetVisible(selected &&
+-                                     popup_view_->GetSelection().state ==
+-                                         OmniboxPopupSelection::NORMAL);
+-  }
+-
+   if (suggestion_view_->iph_link_view()->GetVisible()) {
+     views::FocusRing::Get(suggestion_view_->iph_link_view())->SchedulePaint();
+   }
+diff --git a/chrome/browser/ui/views/omnibox/omnibox_row_view.cc b/chrome/browser/ui/views/omnibox/omnibox_row_view.cc
+index f350066..ae68dbd 100644
+--- a/chrome/browser/ui/views/omnibox/omnibox_row_view.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_row_view.cc
+@@ -106,16 +106,7 @@ views::View* OmniboxRowView::GetActiveAuxiliaryButtonForAccessibility() const {
+ }
+
+ gfx::Insets OmniboxRowView::GetInsets() const {
+-  if (result_view_->GetThemeState() == OmniboxPartState::IPH) {
+-    int LRInsets = OmniboxMatchCellView::kIphOffset;
+-    return gfx::Insets::TLBR(8, LRInsets, 8, LRInsets);
+-  }
+-
+-  if (result_view_->GetThemeState() == OmniboxPartState::TOOLBELT) {
+-    return gfx::Insets::TLBR(0, 0, 0, 0);
+-  }
+-
+-  return gfx::Insets::TLBR(0, 0, 0, 16);
++  return gfx::Insets::TLBR(2, 4, 0, 4);
+ }
+
+ BEGIN_METADATA(OmniboxRowView)
+diff --git a/chrome/browser/ui/views/omnibox/omnibox_suggestion_button_row_view.cc b/chrome/browser/ui/views/omnibox/omnibox_suggestion_button_row_view.cc
+index 23c688d..f182234 100644
+--- a/chrome/browser/ui/views/omnibox/omnibox_suggestion_button_row_view.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_suggestion_button_row_view.cc
+@@ -73,7 +73,7 @@ class OmniboxSuggestionRowChip : public views::MdTextButton {
+                               views::DISTANCE_RELATED_BUTTON_HORIZONTAL)));
+
+     SetImageLabelSpacing(5);
+-    SetCustomPadding(gfx::Insets::VH(0, 7));
++    SetCustomPadding(gfx::Insets::VH(0, 6));
+     SetCornerRadius(100);  // Large number to ensure 100% rounded.
+
+     views::InkDrop::Get(this)->GetInkDrop()->SetShowHighlightOnHover(false);
+@@ -266,7 +266,7 @@ class OmniboxSuggestionButtonRowLayout : public views::LayoutManager {
+   //   the suggestion text/view. Additionally, the values here were selected to
+   //   produce the designed layout, but they should either be explained further
+   //   here or specified with `ChromeLayoutProvider`.
+-  gfx::Insets row_insets_ = gfx::Insets::TLBR(6, 4, 6, 0);
++  gfx::Insets row_insets_ = gfx::Insets::TLBR(1, 4, 0, 0);
+   gfx::Insets button_insets_ =
+       gfx::Insets::TLBR(0,
+                         0,
+@@ -299,10 +299,9 @@ class OmniboxSuggestionRowButton : public views::MdTextButton {
+                              ui::EF_MIDDLE_MOUSE_BUTTON);
+     views::InstallPillHighlightPathGenerator(this);
+
+-    SetImageLabelSpacing(8);
+-    SetCustomPadding(ChromeLayoutProvider::Get()->GetInsetsMetric(
+-        INSETS_OMNIBOX_PILL_BUTTON));
+-    SetCornerRadius(GetLayoutConstant(LayoutConstant::kToolbarCornerRadius));
++    SetImageLabelSpacing(6);
++    SetCustomPadding(gfx::Insets::VH(3, 8));
++    SetCornerRadius(8);
+
+     auto* const ink_drop = views::InkDrop::Get(this);
+     SetAnimationDuration(base::TimeDelta());
+@@ -314,6 +313,7 @@ class OmniboxSuggestionRowButton : public views::MdTextButton {
+       CHECK(v);
+       return v->GetVisible() && v->popup_view_->GetSelection() == v->selection_;
+     }));
++    focus_ring->SetOutsetFocusRingDisabled(true);
+     focus_ring->SetColorId(kColorOmniboxResultsFocusIndicator);
+
+     GetViewAccessibility().SetRole(ax::mojom::Role::kListBoxOption);
+diff --git a/chrome/browser/ui/views/omnibox/omnibox_view_views.cc b/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
+index 7941ca0..9a43909 100644
+--- a/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
+@@ -663,7 +663,7 @@ int OmniboxViewViews::GetUnelidedTextWidth() const {
+ }
+
+ gfx::Size OmniboxViewViews::GetMinimumSize() const {
+-  constexpr int kMinCharacters = 20;
++  constexpr int kMinCharacters = 32;
+   return gfx::Size(
+       GetFontList().GetExpectedTextWidth(kMinCharacters) + GetInsets().width(),
+       GetPreferredSize().height());
+diff --git a/chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.cc b/chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.cc
+index 34c56e3..cffc8c2 100644
+--- a/chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.cc
++++ b/chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.cc
+@@ -236,8 +236,7 @@ RoundedOmniboxResultsFrame::RoundedOmniboxResultsFrame(
+     LocationBar* location_bar,
+     bool forward_mouse_events)
+     : contents_(contents), forward_mouse_events_(forward_mouse_events) {
+-  const int corner_radius = views::LayoutProvider::Get()->GetCornerRadiusMetric(
+-      views::ShapeContextTokens::kOmniboxExpandedRadius);
++  const int corner_radius = 12;
+   // Host the contents in its own View to simplify layout and customization.
+   auto contents_host_builder =
+       views::Builder<views::View>()
+@@ -305,10 +304,7 @@ int RoundedOmniboxResultsFrame::GetNonResultSectionHeight(bool include_cutout) {
+
+ // static
+ gfx::Insets RoundedOmniboxResultsFrame::GetLocationBarAlignmentInsets() {
+-  if (ui::TouchUiController::Get()->touch_ui()) {
+-    return gfx::Insets::TLBR(6, 1, 5, 1);
+-  }
+-  return gfx::Insets::VH(5, 6);
++  return gfx::Insets::TLBR(3, 7, 0, 7);
+ }
+
+ // static
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_button.cc b/chrome/browser/ui/views/toolbar/toolbar_button.cc
+index 1115e77..63c75d5 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_button.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_button.cc
+@@ -160,7 +160,7 @@ void ToolbarButton::ClearHighlight() {
+
+ int ToolbarButton::GetRoundedCornerRadius() const {
+   return ChromeLayoutProvider::Get()->GetCornerRadiusMetric(
+-      views::Emphasis::kMaximum, GetTargetSize());
++      views::Emphasis::kHigh, GetTargetSize());
+ }
+
+ float ToolbarButton::GetCornerRadiusFor(ToolbarButton::Edge edge) const {
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_icon_container_view.cc b/chrome/browser/ui/views/toolbar/toolbar_icon_container_view.cc
+index b5eae4f..b6598b2 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_icon_container_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_icon_container_view.cc
+@@ -46,7 +46,7 @@ void ToolbarIconContainerView::RoundRectBorder::OnPaintLayer(
+   gfx::Canvas* canvas = paint_recorder.canvas();
+
+   const int radius = ChromeLayoutProvider::Get()->GetCornerRadiusMetric(
+-      views::Emphasis::kMaximum, layer_.size());
++      views::Emphasis::kHigh, layer_.size());
+   cc::PaintFlags flags;
+   flags.setAntiAlias(true);
+   flags.setStyle(cc::PaintFlags::kStroke_Style);
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_ink_drop_util.cc b/chrome/browser/ui/views/toolbar/toolbar_ink_drop_util.cc
+index 6f436d3..0221d34 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_ink_drop_util.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_ink_drop_util.cc
+@@ -41,7 +41,7 @@ class ToolbarButtonHighlightPathGenerator
+     rect.Inset(GetToolbarInkDropInsets(view));
+
+     const int radii = ChromeLayoutProvider::Get()->GetCornerRadiusMetric(
+-        views::Emphasis::kMaximum, rect.size());
++        views::Emphasis::kHigh, rect.size());
+
+     return SkPath::RRect(
+         SkRRect::MakeRectXY(gfx::RectToSkRect(rect), radii, radii));

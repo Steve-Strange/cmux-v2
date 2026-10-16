@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "cmux Side Panel Fixture",
+  "version": "1.0.0",
+  "description": "Exercises tab-scoped Chrome side panels in cmux-browser.",
+  "permissions": ["sidePanel", "tabs"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "Open cmux side-panel fixture"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "MacCtrl+Shift+Y"
+      }
+    }
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  }
+}

@@ -1,0 +1,66 @@
+#!/bin/bash -p
+set -euo pipefail
+
+script_source="${BASH_SOURCE[0]}"
+script_parent="${script_source%/*}"
+if [[ "$script_parent" == "$script_source" ]]; then
+  script_parent=.
+fi
+script_dir="$(cd "$script_parent" && pwd -P)"
+bootstrap=/usr/bin/python3
+if [[ ! -x "$bootstrap" ]]; then
+  echo "autoreview infrastructure failure: trusted Python bootstrap not found: $bootstrap" >&2
+  exit 2
+fi
+
+# Use the OS interpreter only to resolve and validate the requested modern
+# interpreter. Both processes run isolated and without site initialization, so
+# PYTHONPATH, user-site packages, sitecustomize, and .pth files cannot execute
+# before the reviewer establishes its trust boundary.
+exec "$bootstrap" -I -S -B -c '
+import os
+import shutil
+import sys
+
+script = os.path.realpath(sys.argv[1])
+args = sys.argv[2:]
+repo = None
+for index, value in enumerate(args):
+    if value == "--repo" and index + 1 < len(args):
+        repo = args[index + 1]
+        break
+    if value.startswith("--repo="):
+        repo = value.split("=", 1)[1]
+        break
+if not repo:
+    sys.stderr.write("autoreview infrastructure failure: --repo is required\n")
+    raise SystemExit(2)
+
+repo = os.path.realpath(repo)
+python = shutil.which("python3")
+if not python:
+    sys.stderr.write("autoreview infrastructure failure: python3 not found\n")
+    raise SystemExit(2)
+python = os.path.realpath(python)
+
+def inside(path, root):
+    try:
+        return os.path.commonpath((path, root)) == root
+    except ValueError:
+        return False
+
+if inside(python, repo):
+    sys.stderr.write(
+        "autoreview infrastructure failure: refusing Python from reviewed checkout: "
+        + python + "\n"
+    )
+    raise SystemExit(2)
+if inside(script, repo):
+    sys.stderr.write(
+        "autoreview infrastructure failure: refusing reviewer from reviewed checkout: "
+        + script + "\n"
+    )
+    raise SystemExit(2)
+
+os.execv(python, [python, "-I", "-S", "-B", script, *args])
+' "$script_dir/autoreview.py" "$@"

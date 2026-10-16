@@ -1,0 +1,48 @@
+{
+  "build_instructions": "docs/releases.md",
+  "dependencies": [
+    {
+      "commit": "782af9cb30a53f54487e5d2e44738645a8ec457c",
+      "name": "Chromium",
+      "repository": "https://chromium.googlesource.com/chromium/src",
+      "version": "151.0.7922.34"
+    },
+    {
+      "commit": "f6085bbb9259767f94ed4890b0eb8df609209936",
+      "name": "cmux and cmux-tui",
+      "repository": "https://github.com/manaflow-ai/cmux"
+    },
+    {
+      "commit": "50ad1963d9c73ee957932ccb4d26bf6d15575ee7",
+      "name": "Ghostty",
+      "repository": "https://github.com/manaflow-ai/ghostty"
+    },
+    {
+      "commit": "3d370ea1603988bf678d7c5f621f161925fc36d9",
+      "name": "uBlock Origin",
+      "repository": "https://github.com/gorhill/uBlock"
+    },
+    {
+      "additional_commits": [
+        "dee5600297344dd25b2dddb2ba343e19be7723f7"
+      ],
+      "commit": "8030a8a3050151a141c06cc5a85f95cbbdc42a25",
+      "name": "Helium",
+      "repository": "https://github.com/imputnet/helium"
+    }
+  ],
+  "license": "GPL-3.0-only",
+  "license_scope": {
+    "cmux_authored_material": "GPL-3.0-or-later",
+    "combined_work": "GPL-3.0-only",
+    "helium_derived_material": "GPL-3.0-only"
+  },
+  "notices": "THIRD_PARTY_NOTICES.md",
+  "schema": 1,
+  "source": {
+    "commit": "dd7984e7ea68ee42768feebe3691b7b7ffdca6e6",
+    "included_in_archive": true,
+    "repository": "manaflow-ai/cmux-browser"
+  },
+  "version": "151.0.7922.64"
+}

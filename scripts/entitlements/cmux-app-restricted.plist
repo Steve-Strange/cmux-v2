@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Tier 2 outer-app entitlements for Developer ID signing.
+
+  This is a full outer-app entitlement template: Tier 1 unrestricted keys plus
+  the restricted browser keys from Chromium's
+  /Users/lawrence/chromium/src/chrome/app/app-entitlements-chrome.plist.
+
+  deploy.sh substitutes ${CMUX_TEAM_ID} and ${CMUX_BUNDLE_ID} before signing.
+  Do not use this file with ad-hoc signing.
+-->
+<plist version="1.0">
+<dict>
+	<!-- Tier 1 unrestricted set: see cmux-app.plist for source comments. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.device.bluetooth</key>
+	<true/>
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.device.print</key>
+	<true/>
+	<key>com.apple.security.device.usb</key>
+	<true/>
+	<key>com.apple.security.personal-information.addressbook</key>
+	<true/>
+	<key>com.apple.security.personal-information.calendars</key>
+	<true/>
+	<key>com.apple.security.personal-information.location</key>
+	<true/>
+	<key>com.apple.security.personal-information.photos-library</key>
+	<true/>
+
+	<!-- Chromium app-entitlements-chrome.plist -->
+	<key>com.apple.application-identifier</key>
+	<string>${CMUX_TEAM_ID}.${CMUX_BUNDLE_ID}</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<!-- Preserve access to keychain items created by the existing cmux app. -->
+		<string>${CMUX_TEAM_ID}.${CMUX_BUNDLE_ID}</string>
+		<string>${CMUX_TEAM_ID}.${CMUX_BUNDLE_ID}.devicetrust</string>
+		<string>${CMUX_TEAM_ID}.${CMUX_BUNDLE_ID}.secure-payment-confirmation</string>
+		<string>${CMUX_TEAM_ID}.${CMUX_BUNDLE_ID}.unexportable-keys</string>
+		<string>${CMUX_TEAM_ID}.${CMUX_BUNDLE_ID}.webauthn</string>
+		<string>${CMUX_TEAM_ID}.${CMUX_BUNDLE_ID}.webauthn-uvk</string>
+	</array>
+	<key>com.apple.developer.web-browser.public-key-credential</key>
+	<true/>
+</dict>
+</plist>

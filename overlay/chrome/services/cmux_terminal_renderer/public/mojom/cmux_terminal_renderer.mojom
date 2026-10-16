@@ -1,0 +1,170 @@
+// Copyright 2026 Manaflow, Inc.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+module cmux.mojom;
+
+import "sandbox/policy/mojom/sandbox.mojom";
+
+struct TerminalKeyEvent {
+  int32 action;
+  uint32 mods;
+  uint32 consumed_mods;
+  uint32 keycode;
+  string text;
+  uint32 unshifted_codepoint;
+  bool composing;
+};
+
+enum TerminalFrameColorSpace {
+  kDisplayP3,
+};
+
+interface CmuxTerminalRendererClient {
+  OnFrame(handle<platform> io_surface,
+          uint64 delivery_sequence,
+          uint64 frame_token,
+          uint64 geometry_epoch,
+          uint32 width_px,
+          uint32 height_px,
+          TerminalFrameColorSpace color_space);
+  OnInput(array<uint8> bytes);
+  // Same-pipe fence for the compatibility input stream. Every OnInput emitted
+  // before the renderer entered buffered mode is delivered before this call.
+  OnTerminalHostInputCutoverReady(uint64 cutover_id,
+                                  bool success,
+                                  string error);
+  // Buffered input is republished through OnInput before this marker, making
+  // cancellation an ordered return to the compatibility route.
+  OnTerminalHostInputCutoverCancelled(uint64 cutover_id, string reason);
+  // Same-pipe fence for intentional renderer eviction. Every compatibility
+  // input returned by an interrupted cutover and every lifecycle event
+  // observed while draining the direct socket is delivered before this
+  // marker. Success proves that the socket flushed its queued input and
+  // ReleaseViewer before closing, so the Browser may retire this process
+  // without treating it as a renderer crash.
+  OnColdEvictionReady(uint64 eviction_id, bool success, string error);
+  // The pixel dimensions identify the exact IOSurface geometry belonging to
+  // this epoch. They let the browser reject a resize frame that began drawing
+  // while Ghostty was still applying the preceding geometry operation.
+  OnGridSize(uint16 columns,
+             uint16 rows,
+             uint32 width_px,
+             uint32 height_px,
+             uint32 cell_width_px,
+             uint32 cell_height_px,
+             uint64 geometry_epoch);
+  // Same-pipe completion for a ViewerSize proposal that did not change the
+  // canonical grid or backing scale. The renderer advances its external frame
+  // context to this epoch, but deliberately does not mutate the grid, refresh,
+  // or produce a replacement frame. The browser may keep its retained exact
+  // IOSurface and reopen semantic input after this marker.
+  OnTerminalHostViewerSizeUnchanged(uint16 columns,
+                                    uint16 rows,
+                                    uint64 geometry_epoch);
+  // Low-rate terminal-host metadata remains on Mojo. PTY output, input, and
+  // ViewerSize never traverse the browser process while a direct host is live.
+  OnTerminalHostBackground(bool has_override,
+                           uint8 red,
+                           uint8 green,
+                           uint8 blue);
+  OnTerminalHostTitle(string title);
+  OnTerminalHostPwd(string pwd);
+  OnTerminalHostBell();
+  OnTerminalHostExit();
+  OnTerminalHostDisconnected(string reason);
+  OnClose(bool process_alive);
+  OnError(string reason);
+};
+
+// One instance is launched in one dedicated utility process for one terminal.
+// The process is intentionally unsandboxed for the first integration slice:
+// Ghostty needs fonts, config, Metal, and IOSurface services, and the next slice
+// gives it a capability-scoped Unix-socket attachment to cmux TUI. Tightening
+// this to a purpose-built sandbox is tracked separately from process isolation.
+[ServiceSandbox=sandbox.mojom.Sandbox.kNoSandbox]
+interface CmuxTerminalRenderer {
+  Initialize(pending_remote<CmuxTerminalRendererClient> client,
+             uint32 width_px,
+             uint32 height_px,
+             float scale_factor,
+             string theme_name,
+             uint64 geometry_epoch) => (bool success,
+                                      string error,
+                                      uint8 background_red,
+                                      uint8 background_green,
+                                      uint8 background_blue);
+
+  // Replaces only resolved color defaults in place. The Browser resolves the
+  // selected theme once and broadcasts this compact config, avoiding repeated
+  // file IO and disposable renderer restarts across large workspaces.
+  UpdateTheme(string theme_config);
+  SetSize(uint32 width_px,
+          uint32 height_px,
+          float scale_factor,
+          uint64 geometry_epoch);
+  SetFocus(bool focused);
+  SetVisible(bool visible);
+  ProcessOutput(array<uint8> bytes);
+  // Applies the canonical grid and replay as one publication boundary. Frames
+  // produced by the grid mutation retain the preceding geometry epoch; the new
+  // epoch is made publishable only after the replay has been parsed in full.
+  ResetAndReplayAtGrid(uint16 columns,
+                       uint16 rows,
+                       array<uint8> replay,
+                       uint64 geometry_epoch);
+
+  // Quiesces libghostty input before the Browser drains its compatibility
+  // queue. The client-side Ready event is the ordering fence; this one-way
+  // request deliberately has no cross-pipe response.
+  BeginTerminalHostInputCutover(uint64 cutover_id);
+  // Installs one already-authenticated renderer capability. The cutover id
+  // must already be quiesced. Success is returned only after Snapshot+Colors
+  // has been applied, buffered input has been queued first on this socket, and
+  // all subsequent libghostty input has switched to the direct route.
+  AttachTerminalHost(handle<platform> socket,
+                     array<uint8> terminal_id,
+                     array<uint8> terminal_incarnation,
+                     uint32 rights,
+                     uint32 protocol_flags,
+                     uint64 cutover_id) => (bool success, string error);
+  // Returns a quiesced transition to compatibility. Buffered bytes are sent
+  // through OnInput before the client-side Cancelled marker.
+  CancelTerminalHostInputCutover(uint64 cutover_id);
+  DetachTerminalHost();
+  // Orders behind older semantic input, then flushes and releases the direct
+  // terminal-host socket. Completion is reported on the ordered client pipe
+  // through OnColdEvictionReady rather than as a cross-pipe response.
+  PrepareForColdEviction(uint64 eviction_id);
+  // In direct mode AppKit computes a proposed logical grid from the last
+  // authoritative cell metrics. The utility sends ViewerSize to cmux-tui;
+  // it does not speculatively resize/reflow Ghostty.
+  RequestTerminalHostViewerSize(uint16 columns,
+                                uint16 rows,
+                                float scale_factor,
+                                uint64 geometry_epoch);
+
+  SendKey(TerminalKeyEvent event);
+  // NSTextInputClient commits and composition state must reach the same
+  // Ghostty encoder as physical keys so IME output follows the direct socket.
+  SendText(string text);
+  // Paste is semantically distinct from typed text, but every route asks the
+  // Ghostty mirror to encode it. The resulting IoWrite joins the same FIFO as
+  // keys and mouse events, with bracketed-paste mode restored by replay.
+  Paste(string text) => (bool success, string error);
+  CopySelection() => (bool success, string text);
+  SetPreedit(string text);
+  MouseMove(float x, float y, uint32 mods);
+  // Completion means the semantic button event ran after the authoritative
+  // output fence and any synchronous Ghostty IO write was classified. The
+  // browser retains crash-replayed releases until `accepted`; `consumed`
+  // separately preserves Ghostty's native fallback contract for right-click.
+  MouseButton(int32 state, int32 button, uint32 mods) => (bool accepted,
+                                                          bool consumed);
+  MouseScroll(float x, float y, int32 scroll_mods);
+  // Delivery acknowledgement only opens the bounded Mojo delivery gate. It
+  // does not make the IOSurface reusable.
+  AcknowledgeFrameDelivery(uint64 delivery_sequence);
+  // Releases Ghostty's lease for one exact swap-chain acquisition. Calls are
+  // idempotent at the Mojo boundary; stale or duplicate tokens are ignored.
+  ReleaseFrame(uint64 frame_token);
+};

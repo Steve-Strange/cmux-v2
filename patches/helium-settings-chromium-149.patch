@@ -1,0 +1,745 @@
+From c362740d53158863a8c253028679033addf085e2 Mon Sep 17 00:00:00 2001
+From: Helium contributors <https://github.com/imputnet/helium>
+Date: Tue, 21 Jul 2026 00:00:00 -0700
+Subject: [PATCH] cmux: adapt Helium's settings appearance
+
+Adapted from Helium's Chromium-149 patch set at:
+  c362740d53158863a8c253028679033addf085e2
+
+Upstream source patches:
+  patches/helium/settings/about-page-tweaks.patch
+  patches/helium/settings/fix-section-separators.patch
+  patches/helium/settings/reorder-settings-menu.patch
+  patches/helium/settings/settings-page-icons.patch
+  patches/helium/ui/update-cr-components.patch
+  patches/helium/ui/helium-color-scheme.patch (WebUI colors only)
+  patches/helium/ui/rounded-frame-corners.patch (preference/default only)
+
+Primary upstream authors:
+  wukko <me@wukko.me>
+  jj <log@riseup.net>
+
+Important upstream commits:
+  f34f4e8bd28fb46d6dc688bf5d3f41943ae94d5c
+  af5539abf7da5640a46d81d2dd6ba615d3615861
+  d2021bb3ef0bd47f55490e8a4c84acc09d851f38
+  89ee3b3b1444e637234e2e6378cabad407a155a8
+  ec8480c3f530cb589dff30c3e3c62f695ad37872
+  f45035b8c911403bed96afce88d8d632f9ac4008
+  08f481a31451e06bac018dc31e3dd1558eede3b1
+  38a114d48d2c35a304d67d03f3f1bbcc2b1b6aad
+  a3db74b428e0747125b96dbb21d5f9f693bb3790
+  f8269d25877daaad87e24c753bc3fcd1d899bbe6
+  04e5e237a63144dde7d195a7930d40fb41b7a0a3
+
+Modified for cmux on 2026-07-21:
+  * rebased onto Chromium 149.0.7780.0;
+  * renamed the Helium WebUI color token to cmux;
+  * retained Chromium-149 icon/string identifiers;
+  * kept hidden pages routable while matching Helium's visible menu;
+  * corrected SVG markup/viewBox while preserving Helium's security glyph;
+  * registered Helium's rounded-frame preference, default-on, for cmux's
+    terminal and browser surface implementation.
+
+Helium-derived modifications are licensed under GPL-3.0-only. See
+third_party/helium/LICENSE and THIRD_PARTY_NOTICES.md. Unmodified Chromium
+portions retain their original BSD-style license.
+---
+diff --git a/chrome/browser/resources/settings/a11y_page/a11y_page.html b/chrome/browser/resources/settings/a11y_page/a11y_page.html
+index 85341e0..b82c638 100644
+--- a/chrome/browser/resources/settings/a11y_page/a11y_page.html
++++ b/chrome/browser/resources/settings/a11y_page/a11y_page.html
+@@ -10,11 +10,10 @@
+ </if>
+ 
+ <if expr="is_macosx or is_win">
+         <template is="dom-if" if="[[enableLiveCaption_]]">
+           <settings-live-caption prefs="{{prefs}}"></settings-live-caption>
+         </template>
+         <cr-link-row id="captions"
+-            class="hr"
+             label="$i18n{captionsPreferencesTitle}"
+             sub-label="$i18n{captionsPreferencesSubtitle}"
+             on-click="onCaptionsClick_"
+@@ -25,7 +24,6 @@
+ 
+ <if expr="is_linux">
+           <cr-link-row id="captions"
+-              class="hr"
+               label="$i18n{captionsTitle}"
+               on-click="onCaptionsClick_"
+               role-description="$i18n{subpageArrowRoleDescription}">
+diff --git a/chrome/browser/resources/settings/about_page/about_page.html b/chrome/browser/resources/settings/about_page/about_page.html
+index 5069802..d4db848 100644
+--- a/chrome/browser/resources/settings/about_page/about_page.html
++++ b/chrome/browser/resources/settings/about_page/about_page.html
+@@ -5,10 +5,7 @@
+ 
+       .info-sections {
+         padding: var(--cr-section-vertical-padding) var(--cr-section-padding);
+-      }
+-
+-      .info-section {
+-        margin-bottom: 12px;
++        line-height: 1.8;
+       }
+ 
+       .product-title {
+@@ -47,7 +44,7 @@
+     </style>
+     <settings-section page-title="$i18n{aboutPageTitle}">
+       <div class="cr-row two-line first">
+-        <img id="product-logo" on-click="onProductLogoClick_"
++        <img id="product-logo"
+             srcset="chrome://theme/current-channel-logo@1x 1x,
+                     chrome://theme/current-channel-logo@2x 2x"
+             alt="$i18n{aboutProductLogoAlt}"
+@@ -78,12 +75,6 @@
+                 inner-h-t-m-l="[[getUpdateStatusMessage_(
+                     currentUpdateStatusEvent_)]]">
+             </div>
+-            <a hidden$="[[!shouldShowLearnMoreLink_(
+-                currentUpdateStatusEvent_)]]" target="_blank"
+-                href="https://support.google.com/chrome?p=update_error"
+-                aria-label="$i18nPolymer{aboutLearnMoreUpdatingErrors}">
+-              $i18n{learnMore}
+-            </a>
+           </div>
+           <span id="deprecationWarning"
+               hidden="[[!obsoleteSystemInfo_.obsolete]]">
+@@ -114,12 +105,6 @@
+             on-click="onPromoteUpdaterClick_">
+           <div class="flex">
+             [[promoteUpdaterStatus_.text]]
+-            <a href="https://support.google.com/chrome/answer/95414"
+-                target="_blank" id="updaterLearnMore"
+-                on-click="onLearnMoreClick_"
+-                aria-label="$i18nPolymer{aboutLearnMoreUpdating}">
+-              $i18n{learnMore}
+-            </a>
+           </div>
+           <cr-icon-button class="subpage-arrow"
+               hidden$="[[!promoteUpdaterStatus_.actionable]]"
+@@ -148,7 +133,6 @@
+     <settings-section>
+       <div class="info-sections">
+         <div class="info-section">
+-          <div class="secondary">$i18n{aboutProductTitle}</div>
+           <div class="secondary">$i18n{aboutProductCopyright}</div>
+         </div>
+ 
+diff --git a/chrome/browser/resources/settings/icons.html b/chrome/browser/resources/settings/icons.html
+index 31d6e5e..ecc8eac 100644
+--- a/chrome/browser/resources/settings/icons.html
++++ b/chrome/browser/resources/settings/icons.html
+@@ -71,7 +71,7 @@ NOTE: Chrome OS icons go in ./chromeos/os_icons.html.
+       <g id="person-text" viewBox="0 -960 960 960"><path d="M648-240v-72h216v72H648Zm-48-204v-72h264v72H600Zm-72-204v-72h336v72H528ZM336-480q-50 0-85-35t-35-85q0-50 35-85t85-35q50 0 85 35t35 85q0 50-35 85t-85 35ZM96-240v-63q0-28 14.5-51t38.5-35q43-21 90-32t97-11q50 0 97 11t90 32q24 12 38.5 35t14.5 51v63H96Zm240-120q-53 0-95 12.5T169-312h334q-30-23-72-35.5T336-360Zm0-192q20.4 0 34.2-13.8Q384-579.6 384-600q0-20.4-13.8-34.2Q356.4-648 336-648q-20.4 0-34.2 13.8Q288-620.4 288-600q0 20.4 13.8 34.2Q315.6-552 336-552Zm0-48Zm0 288Z"></path></g>
+       <g id="point-scan" viewBox="0 -960 960 960"><path d="M423.5-423.5Q400-447 400-480t23.5-56.5Q447-560 480-560t56.5 23.5Q560-513 560-480t-23.5 56.5Q513-400 480-400t-56.5-23.5ZM440-640v-200h80v200h-80Zm0 520v-200h80v200h-80Zm200-320v-80h200v80H640Zm-520 0v-80h200v80H120Z"></path></g>
+       <g id="search-spark"><path d="M15.9375 17L10.9583 12.0208C10.5417 12.3264 10.0833 12.5694 9.58333 12.75C9.08333 12.9167 8.55556 13 8 13C6.61111 13 5.43056 12.5139 4.45833 11.5417C3.48611 10.5694 3 9.38889 3 8C3 6.61111 3.48611 5.43055 4.45833 4.45833C5.43056 3.48611 6.61111 3 8 3C8.36111 3 8.70139 3.03472 9.02083 3.10417C9.35417 3.17361 9.67361 3.27778 9.97917 3.41667L8.79167 4.58333C8.66667 4.55555 8.53472 4.53472 8.39583 4.52083C8.27083 4.50694 8.13889 4.5 8 4.5C7.02778 4.5 6.20139 4.84028 5.52083 5.52083C4.84028 6.20139 4.5 7.02778 4.5 8C4.5 8.97222 4.84028 9.79861 5.52083 10.4792C6.20139 11.1597 7.02778 11.5 8 11.5C8.80556 11.5 9.51389 11.2708 10.125 10.8125C10.7361 10.3403 11.1458 9.73611 11.3542 9H12.8958C12.8264 9.36111 12.7153 9.70833 12.5625 10.0417C12.4097 10.3611 12.2292 10.6667 12.0208 10.9583L17 15.9375L15.9375 17ZM14.5 10C14.5 8.75 14.0625 7.6875 13.1875 6.8125C12.3125 5.9375 11.25 5.5 10 5.5C11.25 5.5 12.3125 5.0625 13.1875 4.1875C14.0625 3.3125 14.5 2.25 14.5 0.999999C14.5 2.25 14.9375 3.3125 15.8125 4.1875C16.6875 5.0625 17.75 5.5 19 5.5C17.75 5.5 16.6875 5.9375 15.8125 6.8125C14.9375 7.6875 14.5 8.75 14.5 10Z"></path></g>
+-      <g id="security"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.183 4.7L10 1.667 16.816 4.7v4.542c0 4.208-2.908 8.133-6.816 9.091-3.909-.958-6.817-4.883-6.817-9.091V4.7zM15.3 9.992H10V3.325L4.7 5.683V10l5.3-.008v6.775c2.816-.875 4.9-3.65 5.3-6.775z"></path></g>
++      <g id="security" viewBox="0 -960 960 960"><path d="M420-360h120l-23-129q20-10 31.5-29t11.5-42q0-33-23.5-56.5T480-640q-33 0-56.5 23.5T400-560q0 23 11.5 42t31.5 29l-23 129Zm60 280q-139-35-229.5-159.5T160-516v-244l320-120 320 120v244q0 152-90.5 276.5T480-80Zm0-84q104-33 172-132t68-220v-189l-240-90-240 90v189q0 121 68 220t172 132Zm0-316Z"></path></g>
+       <g id="shield" viewBox="0 -960 960 960"><path d="M480-80q-139-35-229.5-159.5T160-516v-244l320-120 320 120v244q0 152-90.5 276.5T480-80Zm0-84q104-33 172-132t68-220v-189l-240-90-240 90v189q0 121 68 220t172 132Zm0-316Z"></path></g>
+       <g id="shield-spark" viewBox="0 -960 960 960"><path d="M480-80q-139-35-229.5-159.5T160-516v-244l320-120 320 120v244q0 152-90.5 276.5T480-80Zm0-84q104-33 172-132t68-220v-189l-240-90-240 90v189q0 121 68 220t172 132Zm0-316Zm0 180q7 0 8-6 16-61 60.5-105.5T654-472q6-2 6-8 0-7-6-8-61-16-105-60.5T488-654q-1-6-8-6-6 0-8 6-16 61-60.5 105.5T306-488q-6 1-6 8 0 6 6 8 61 16 105.5 60.5T472-306q2 6 8 6Z"></path></g>
+       <g id="sprint"><path d="M 4.519531 16.5 L 3.480469 15.4375 L 11.417969 7.5 L 9.5 7.5 L 9.5 9 L 8 9 L 8 6 L 12.644531 6 L 16.707031 10.042969 C 17.027344 10.347656 17.378906 10.582031 17.761719 10.75 C 18.140625 10.917969 18.554688 11 19 11 L 19 12.5 C 18.359375 12.5 17.753906 12.378906 17.175781 12.136719 C 16.601562 11.890625 16.089844 11.546875 15.644531 11.105469 L 14 9.5 L 12 11.5 L 13.980469 13.480469 L 8.75 16.5 L 8 15.207031 L 11.519531 13.167969 L 9.707031 11.332031 Z M 3 11 L 3 9.5 L 7 9.5 L 7 11 Z M 1 8.5 L 1 7 L 5 7 L 5 8.5 Z M 16 7 C 15.582031 7 15.230469 6.851562 14.9375 6.558594 C 14.644531 6.261719 14.5 5.910156 14.5 5.496094 C 14.5 5.082031 14.644531 4.730469 14.9375 4.4375 C 15.230469 4.144531 15.582031 4 16 4 C 16.417969 4 16.769531 4.148438 17.0625 4.441406 C 17.355469 4.738281 17.5 5.089844 17.5 5.503906 C 17.5 5.917969 17.355469 6.269531 17.0625 6.5625 C 16.769531 6.855469 16.417969 7 16 7 Z M 3 6 L 3 4.5 L 7 4.5 L 7 6 Z M 3 6 "></path></g>
+@@ -168,7 +168,7 @@ NOTE: Chrome OS icons go in ./chromeos/os_icons.html.
+ 
+       <!-- Navigation: Security GM3 icon -->
+       <g id="security" viewBox="0 -960 960 960">
+-        <path d="M480-96q-135-33-223.5-153T168-515v-229l312-120 312 120v229q0 146-88.5 266T480-96Zm0-75q97-30 161.5-115.5T717-480H480v-307l-240 92v180q0 9 1 17.5t2 17.5h237v309Z"></path>
++        <path d="M420-360h120l-23-129q20-10 31.5-29t11.5-42q0-33-23.5-56.5T480-640q-33 0-56.5 23.5T400-560q0 23 11.5 42t31.5 29l-23 129Zm60 280q-139-35-229.5-159.5T160-516v-244l320-120 320 120v244q0 152-90.5 276.5T480-80Zm0-84q104-33 172-132t68-220v-189l-240-90-240 90v189q0 121 68 220t172 132Zm0-316Z"></path>
+       </g>
+ 
+ <if expr="not is_chromeos">
+diff --git a/chrome/browser/resources/settings/languages_page/spell_check_page.html b/chrome/browser/resources/settings/languages_page/spell_check_page.html
+index 3724d12..c91b176 100644
+--- a/chrome/browser/resources/settings/languages_page/spell_check_page.html
++++ b/chrome/browser/resources/settings/languages_page/spell_check_page.html
+@@ -56,7 +56,7 @@
+ </style>
+ <settings-section page-title="$i18n{spellCheckTitle}">
+   <div route-path="default">
+-    <settings-toggle-button id="enableSpellcheckingToggle" class="hr"
++    <settings-toggle-button id="enableSpellcheckingToggle"
+         label="$i18n{offerToEnableSpellCheck}"
+         sub-label="[[getSpellCheckSubLabel_(spellCheckLanguages_)]]"
+         pref="{{prefs.browser.enable_spellchecking}}"
+diff --git a/chrome/browser/resources/settings/route.ts b/chrome/browser/resources/settings/route.ts
+index afebf9e..f3d68af 100644
+--- a/chrome/browser/resources/settings/route.ts
++++ b/chrome/browser/resources/settings/route.ts
+@@ -358,7 +358,7 @@ export let routes: SettingsRoutes = Router.getInstance().getRoutes();
+ // Returns the "effective" route when at chrome://settings/.
+ export function getTopLevelRoute(): Route {
+   if (!loadTimeData.getBoolean('isGuest')) {
+-    return routes.PEOPLE;
++    return routes.APPEARANCE;
+   }
+ 
+   let guestTopLevelRoute = routes.SEARCH;
+diff --git a/chrome/browser/resources/settings/settings_menu/settings_menu.html b/chrome/browser/resources/settings/settings_menu/settings_menu.html
+index 3cb9e3a..b656cff 100644
+--- a/chrome/browser/resources/settings/settings_menu/settings_menu.html
++++ b/chrome/browser/resources/settings/settings_menu/settings_menu.html
+@@ -57,14 +57,11 @@
+           $i18n{peoplePageTitle}
+           <cr-ripple></cr-ripple>
+         </a>
+-        <a role="menuitem" id="autofill" href="/autofill"
+-            on-click="onAutofillClick_"
+-            class="cr-nav-menu-item"
+-            hidden="[[!showAutofillMenuItem_(
+-                enableYourSavedInfoSettingsPage_,
+-                pageVisibility_.yourSavedInfo, pageVisibility_.autofill)]]">
+-          <cr-icon icon="settings:assignment"></cr-icon>
+-          $i18n{autofillPageTitle}
++        <a role="menuitem" id="appearance" href="/appearance"
++            hidden="[[!pageVisibility_.appearance]]"
++            class="cr-nav-menu-item">
++          <cr-icon icon="settings:palette"></cr-icon>
++          $i18n{appearancePageTitle}
+           <cr-ripple></cr-ripple>
+         </a>
+         <a role="menuitem" href="/privacy"
+@@ -81,21 +78,6 @@
+           $i18n{performancePageTitle}
+           <cr-ripple></cr-ripple>
+         </a>
+-        <a role="menuitem" href="/ai"
+-            hidden="[[!showAiPageMenuItem_(showAiPage_, pageVisibility_.ai)]]"
+-            on-click="onAiPageClick_"
+-            class="cr-nav-menu-item">
+-          <cr-icon icon="settings20:magic"></cr-icon>
+-          $i18n{aiInnovationsPageTitle}
+-          <cr-ripple></cr-ripple>
+-        </a>
+-        <a role="menuitem" id="appearance" href="/appearance"
+-            hidden="[[!pageVisibility_.appearance]]"
+-            class="cr-nav-menu-item">
+-          <cr-icon icon="settings:palette"></cr-icon>
+-          $i18n{appearancePageTitle}
+-          <cr-ripple></cr-ripple>
+-        </a>
+         <a role="menuitem" href="/search" class="cr-nav-menu-item">
+           <cr-icon icon="settings:search"></cr-icon>
+           $i18n{searchPageTitle}
+@@ -167,7 +149,7 @@
+         </a>
+         <a role="menuitem" id="about-menu" href="/help"
+             class="cr-nav-menu-item">
+-          <cr-icon icon="cr:chrome-product"></cr-icon>
++          <cr-icon icon="cr:info-outline"></cr-icon>
+           $i18n{aboutPageTitle}
+           <cr-ripple></cr-ripple>
+         </a>
+diff --git a/ui/webui/resources/cr_components/customize_color_scheme_mode/segmented_button.css b/ui/webui/resources/cr_components/customize_color_scheme_mode/segmented_button.css
+index bfb1090..226ab8a 100644
+--- a/ui/webui/resources/cr_components/customize_color_scheme_mode/segmented_button.css
++++ b/ui/webui/resources/cr_components/customize_color_scheme_mode/segmented_button.css
+@@ -9,15 +9,17 @@
+  * #css_wrapper_metadata_end */
+ 
+ :host {
+-  --segmented-button-height: 44px;
++  --segmented-button-height: 40px;
+   --segmented-button-width: 100%;
+   --segmented-button-padding: 2px;
++  --segmented-button-radius: 11px;
++  --segmented-button-child-radius: 8px;
+ }
+ 
+ cr-radio-group {
+   border: 1px var(--color-segmented-button-border,
+       var(--cr-fallback-color-tonal-outline)) solid;
+-  border-radius: var(--segmented-button-height);
++  border-radius: var(--segmented-button-radius);
+   box-sizing: border-box;
+   display: grid;
+   grid-auto-columns: 1fr;
+@@ -25,6 +27,7 @@ cr-radio-group {
+   height: var(--segmented-button-height);
+   padding: var(--segmented-button-padding);
+   width: var(--segmented-button-width);
++  gap: var(--segmented-button-padding);
+ }
+ 
+ :host ::slotted(*) {
+diff --git a/ui/webui/resources/cr_components/customize_color_scheme_mode/segmented_button_option.css b/ui/webui/resources/cr_components/customize_color_scheme_mode/segmented_button_option.css
+index d32b44e..e6257b0 100644
+--- a/ui/webui/resources/cr_components/customize_color_scheme_mode/segmented_button_option.css
++++ b/ui/webui/resources/cr_components/customize_color_scheme_mode/segmented_button_option.css
+@@ -9,7 +9,7 @@
+  * #css_wrapper_metadata_end */
+ 
+ #button {
+-  border-radius: var(--segmented-button-height);
++  border-radius: var(--segmented-button-child-radius);
+   box-sizing: border-box;
+   color: var(--color-segmented-button-foreground-unchecked,
+       var(--cr-fallback-color-on-surface-subtle));
+@@ -32,7 +32,7 @@
+ }
+ 
+ #button #overlay {
+-  border-radius: var(--segmented-button-height);
++  border-radius: var(--segmented-button-child-radius);
+   box-sizing: border-box;
+   height: 100%;
+   left: 0;
+diff --git a/ui/webui/resources/cr_components/theme_color_picker/theme_color.css b/ui/webui/resources/cr_components/theme_color_picker/theme_color.css
+index d6a4a9b..ae28a89 100644
+--- a/ui/webui/resources/cr_components/theme_color_picker/theme_color.css
++++ b/ui/webui/resources/cr_components/theme_color_picker/theme_color.css
+@@ -8,7 +8,7 @@
+  * #css_wrapper_metadata_end */
+ 
+ :host {
+-  --cr-theme-color-border-radius: 50%;
++  --cr-theme-color-border-radius: 8px;
+   box-sizing: border-box;
+   cursor: pointer;
+   display: block;
+diff --git a/ui/webui/resources/cr_components/theme_color_picker/theme_color_picker.css b/ui/webui/resources/cr_components/theme_color_picker/theme_color_picker.css
+index 7b4f04b..60dc666 100644
+--- a/ui/webui/resources/cr_components/theme_color_picker/theme_color_picker.css
++++ b/ui/webui/resources/cr_components/theme_color_picker/theme_color_picker.css
+@@ -46,6 +46,6 @@ cr-theme-color {
+   background-color: var(
+       --color-theme-color-picker-option-background,
+       var(--cr-fallback-color-neutral-container));
+-  border-radius: 12px;
++  border-radius: 16px;
+   padding: var(--cr-theme-color-padding);
+ }
+diff --git a/ui/webui/resources/cr_components/theme_color_picker/theme_hue_slider_dialog.css b/ui/webui/resources/cr_components/theme_color_picker/theme_hue_slider_dialog.css
+index 246a728..089d704 100644
+--- a/ui/webui/resources/cr_components/theme_color_picker/theme_hue_slider_dialog.css
++++ b/ui/webui/resources/cr_components/theme_color_picker/theme_hue_slider_dialog.css
+@@ -20,7 +20,10 @@ dialog {
+       var(--cr-fallback-color-on-surface));
+   height: 137px;
+   overflow: hidden;
+-  margin: 0;
++
++  /* Visual offset due to one less theme option than upstream */
++  margin: 0;
++  margin-inline-start: 96px;
+   padding: 0;
+   width: 296px;
+ }
+diff --git a/ui/webui/resources/cr_elements/cr_button/cr_button.css b/ui/webui/resources/cr_elements/cr_button/cr_button.css
+index f6a07cc..56f7760 100644
+--- a/ui/webui/resources/cr_elements/cr_button/cr_button.css
++++ b/ui/webui/resources/cr_elements/cr_button/cr_button.css
+@@ -40,12 +40,13 @@
+   user-select: none;
+   -webkit-tap-highlight-color: transparent;
+   border: var(--cr-button-border, 1px solid var(--cr-button-border-color));
+-  border-radius: 100px;
++  border-radius: 8px;
+   background: var(--cr-button-background-color);
+   color: var(--cr-button-text-color);
+   font-weight: 500;
+   line-height: 20px;
+   isolation: isolate;
++  white-space: nowrap;
+ }
+ 
+ :host(.action-button) {
+diff --git a/ui/webui/resources/cr_elements/cr_drawer/cr_drawer.html.ts b/ui/webui/resources/cr_elements/cr_drawer/cr_drawer.html.ts
+index 735615a..bd39315 100644
+--- a/ui/webui/resources/cr_elements/cr_drawer/cr_drawer.html.ts
++++ b/ui/webui/resources/cr_elements/cr_drawer/cr_drawer.html.ts
+@@ -12,16 +12,6 @@ export function getHtml(this: CrDrawerElement) {
+     @click="${this.onDialogClick_}" @close="${this.onDialogClose_}">
+   <div id="container" @click="${this.onContainerClick_}">
+     <div class="drawer-header">
+-      <slot name="header-icon">
+-        <picture>
+-          <source media="(prefers-color-scheme: dark)"
+-              srcset="//resources/images/chrome_logo_dark.svg">
+-          <img id="product-logo"
+-              srcset="chrome://theme/current-channel-logo@1x 1x,
+-                      chrome://theme/current-channel-logo@2x 2x"
+-              role="presentation">
+-        </picture>
+-      </slot>
+       <div id="heading" tabindex="-1">${this.heading}</div>
+     </div>
+     <slot name="body"></slot>
+diff --git a/ui/webui/resources/cr_elements/cr_icon_button/cr_icon_button.css b/ui/webui/resources/cr_elements/cr_icon_button/cr_icon_button.css
+index 88123b0..361dac0 100644
+--- a/ui/webui/resources/cr_elements/cr_icon_button/cr_icon_button.css
++++ b/ui/webui/resources/cr_elements/cr_icon_button/cr_icon_button.css
+@@ -18,7 +18,7 @@
+   --cr-icon-button-width: var(--cr-icon-button-size);
+   /* Copied from paper-fab.html. Prevents square touch highlight. */
+   -webkit-tap-highlight-color: transparent;
+-  border-radius: 50%;
++  border-radius: 6px;
+   color: var(--cr-icon-button-stroke-color,
+       var(--cr-icon-button-fill-color));
+   cursor: pointer;
+diff --git a/ui/webui/resources/cr_elements/cr_nav_menu_item_style_lit.css b/ui/webui/resources/cr_elements/cr_nav_menu_item_style_lit.css
+index 432b3b1..640a730 100644
+--- a/ui/webui/resources/cr_elements/cr_nav_menu_item_style_lit.css
++++ b/ui/webui/resources/cr_elements/cr_nav_menu_item_style_lit.css
+@@ -16,28 +16,28 @@
+   /* Sizes icons for cr-icons. */
+   --cr-icon-ripple-size: 20px;
+   align-items: center;
+-  border-end-end-radius: 100px;
+-  border-start-end-radius: 100px;
++  border-radius: 8px;
+   box-sizing: border-box;
+   color: var(--google-grey-900);
+   display: flex;
+   font-size: 14px;
+   font-weight: 500;
+   line-height: 14px;
+-  margin-inline-end: 2px;
+-  margin-inline-start: 1px;
++  margin-inline-end: 6px;
++  margin-inline-start: 6px;
+   min-height: 40px;
+   overflow: hidden;
+   padding-block-end: 10px;
+   padding-block-start: 10px;
+-  padding-inline-start: 23px;
+-  padding-inline-end: 16px;
++  padding-inline-start: 18px;
++  padding-inline-end: 12px;
+   position: relative;
+   text-decoration: none;
+ }
+ 
+ :host-context(cr-drawer) .cr-nav-menu-item {
+   margin-inline-end: 8px;
++  margin-inline-start: 8px;
+ }
+ 
+ .cr-nav-menu-item:hover {
+@@ -84,7 +84,7 @@
+ .cr-nav-menu-item cr-icon,
+ .cr-nav-menu-item iron-icon {
+   flex-shrink: 0;
+-  margin-inline-end: 20px;
++  margin-inline-end: 16px;
+   pointer-events: none;
+   vertical-align: top;
+ }
+diff --git a/ui/webui/resources/cr_elements/cr_scrollable_lit.css b/ui/webui/resources/cr_elements/cr_scrollable_lit.css
+index 0f12b79..b23760a 100644
+--- a/ui/webui/resources/cr_elements/cr_scrollable_lit.css
++++ b/ui/webui/resources/cr_elements/cr_scrollable_lit.css
+@@ -56,9 +56,9 @@
+ 
+ .cr-scrollable-top-shadow,
+ .cr-scrollable-bottom-shadow {
+-  box-shadow: inset 0 5px 6px -3px rgba(0, 0, 0, .4);
++  box-shadow: var(--cr-elevation-0) inset;
+   display: block;
+-  height: 8px;
++  height: 1px;
+   opacity: 0;
+   top: anchor(top);
+   transition: opacity 500ms;
+diff --git a/ui/webui/resources/cr_elements/cr_shared_vars.css b/ui/webui/resources/cr_elements/cr_shared_vars.css
+index a963769..3d88002 100644
+--- a/ui/webui/resources/cr_elements/cr_shared_vars.css
++++ b/ui/webui/resources/cr_elements/cr_shared_vars.css
+@@ -9,25 +9,26 @@
+ 
+ /* Common css variables for Material Design WebUI */
+ html {
+-  --google-blue-50-rgb: 232, 240, 254;  /* #e8f0fe */
++  --cmux-blue: #3450d1;
++  --google-blue-50-rgb: 238, 245, 255; /* #eef5ff */
+   --google-blue-50: rgb(var(--google-blue-50-rgb));
+-  --google-blue-100-rgb: 210, 227, 252;  /* #d2e3fc */
++  --google-blue-100-rgb: 225, 237, 255; /* #e1edff */
+   --google-blue-100: rgb(var(--google-blue-100-rgb));
+-  --google-blue-200-rgb: 174, 203, 250;  /* #aecbfa */
++  --google-blue-200-rgb: 202, 221, 255; /* #caddff */
+   --google-blue-200: rgb(var(--google-blue-200-rgb));
+-  --google-blue-300-rgb: 138, 180, 248;  /* #8ab4f8 */
++  --google-blue-300-rgb: 174, 201, 255; /* #aec9ff */
+   --google-blue-300: rgb(var(--google-blue-300-rgb));
+-  --google-blue-400-rgb: 102, 157, 246;  /* #669df6 */
++  --google-blue-400-rgb: 144, 177, 255; /* #90b1ff */
+   --google-blue-400: rgb(var(--google-blue-400-rgb));
+-  --google-blue-500-rgb: 66, 133, 244;  /* #4285f4 */
++  --google-blue-500-rgb: 114, 150, 255; /* #7296ff */
+   --google-blue-500: rgb(var(--google-blue-500-rgb));
+-  --google-blue-600-rgb: 26, 115, 232;  /* #1a73e8 */
++  --google-blue-600-rgb: 85, 120, 244; /* #5578f4 */
+   --google-blue-600: rgb(var(--google-blue-600-rgb));
+-  --google-blue-700-rgb: 25, 103, 210;  /* #1967d2 */
++  --google-blue-700-rgb: 58, 88, 218; /* #3a58da */
+   --google-blue-700: rgb(var(--google-blue-700-rgb));
+-  --google-blue-800-rgb: 24, 90, 188;  /* #185abc */
++  --google-blue-800-rgb: 36, 57, 181; /* #2439b5 */
+   --google-blue-800: rgb(var(--google-blue-800-rgb));
+-  --google-blue-900-rgb: 23, 78, 166;  /* #174ea6 */
++  --google-blue-900-rgb: 18, 26, 134; /* #121a86 */
+   --google-blue-900: rgb(var(--google-blue-900-rgb));
+ 
+   --google-green-50-rgb: 230, 244, 234;  /* #e6f4ea */
+@@ -112,6 +113,8 @@ html {
+   --cr-shadow-ambient-color_:
+       color-mix(in srgb, var(--cr-shadow-color) 15%, transparent);
+ 
++
++  --cr-elevation-0: var(--cr-shadow-ambient-color_) 0 0px 0px 1px;
+   --cr-elevation-1: var(--cr-shadow-key-color_) 0 1px 2px 0,
+                     var(--cr-shadow-ambient-color_) 0 1px 3px 1px;
+   --cr-elevation-2: var(--cr-shadow-key-color_) 0 1px 2px 0,
+@@ -123,7 +126,7 @@ html {
+   --cr-elevation-5: var(--cr-shadow-key-color_) 0 4px 4px 0,
+                     var(--cr-shadow-ambient-color_) 0 8px 12px 6px;
+ 
+-  --cr-card-shadow: var(--cr-elevation-2);
++  --cr-card-shadow: var(--cr-elevation-0);
+ 
+   --cr-focused-item-color: var(--google-grey-300);
+   --cr-form-field-label-color: var(--google-grey-700);
+@@ -131,7 +134,7 @@ html {
+   --cr-iph-anchor-highlight-color: rgba(var(--google-blue-600-rgb), 0.1);
+   --cr-menu-background-color: white;
+   --cr-menu-background-focus-color: var(--google-grey-400);
+-  --cr-menu-shadow: var(--cr-elevation-2);
++  --cr-menu-shadow: var(--cr-elevation-1);
+   --cr-separator-color: rgba(0, 0, 0, .06);
+   --cr-title-text-color: rgb(90, 90, 90);
+   --cr-scrollable-border-color: var(--google-grey-300);
+@@ -197,14 +200,14 @@ html {
+      the color pipeline. */
+   --cr-fallback-color-outline: rgb(116, 119, 117);
+ 
+-  --cr-fallback-color-primary: rgb(11, 87, 208);
++  --cr-fallback-color-primary: var(--cmux-blue);
+   --cr-fallback-color-on-primary: rgb(255, 255, 255);
+ 
+-  --cr-fallback-color-primary-container: rgb(211, 227, 253);
+-  --cr-fallback-color-on-primary-container: rgb(4, 30, 73);
++  --cr-fallback-color-primary-container: var(--google-blue-200);
++  --cr-fallback-color-on-primary-container: var(--google-blue-900);
+ 
+-  --cr-fallback-color-secondary-container: rgb(194, 231, 255);
+-  --cr-fallback-color-on-secondary-container: rgb(0, 29, 53);
++  --cr-fallback-color-secondary-container: var(--google-blue-300);
++  --cr-fallback-color-on-secondary-container: var(--google-blue-900);
+ 
+   --cr-fallback-color-neutral-container: rgb(242, 242, 242);
+   --cr-fallback-color-neutral-outline: rgb(199, 199, 199);
+@@ -222,18 +225,18 @@ html {
+ 
+   --cr-fallback-color-on-surface-subtle: rgb(71, 71, 71);
+ 
+-  --cr-fallback-color-inverse-primary: rgb(168, 199, 250);
++  --cr-fallback-color-inverse-primary: var(--google-blue-400);
+   --cr-fallback-color-inverse-surface: rgb(48, 48, 48);
+   --cr-fallback-color-inverse-on-surface: rgb(242, 242, 242);
+ 
+-  --cr-fallback-color-tonal-container: rgb(211, 227, 253);
+-  --cr-fallback-color-on-tonal-container: rgb(4, 30, 73);
++  --cr-fallback-color-tonal-container: var(--google-blue-200);
++  --cr-fallback-color-on-tonal-container: var(--google-blue-900);
+ 
+-  --cr-fallback-color-tonal-outline: rgb(168, 199, 250);
++  --cr-fallback-color-tonal-outline: var(--google-blue-400);
+ 
+   --cr-fallback-color-error: rgb(179, 38, 30);
+ 
+-  --cr-fallback-color-divider: rgb(211, 227, 253);
++  --cr-fallback-color-divider: var(--google-blue-200);
+ 
+   --cr-fallback-color-state-hover-on-prominent_: rgba(253, 252, 251, .1);
+ 
+@@ -246,7 +249,7 @@ html {
+   --cr-fallback-color-state-ripple-primary_: rgba(
+       var(--cr-fallback-color-state-ripple-primary-rgb_), 0.32);
+ 
+-  --cr-fallback-color-base-container: rgb(236, 239, 247);
++  --cr-fallback-color-base-container: var(--google-grey-100);
+ 
+   --cr-fallback-color-disabled-background: rgba(
+       var(--cr-fallback-color-on-surface-rgb), .12);
+@@ -301,12 +304,12 @@ html {
+   html {
+     /* Colors */
+     --cr-fallback-color-outline: rgb(142, 145, 143);
+-    --cr-fallback-color-primary: rgb(168, 199, 250);
+-    --cr-fallback-color-on-primary: rgb(6, 46, 111);
+-    --cr-fallback-color-primary-container: rgb(8, 66, 160);
+-    --cr-fallback-color-on-primary-container: rgb(211, 227, 253);
+-    --cr-fallback-color-secondary-container: rgb(0, 74, 119);
+-    --cr-fallback-color-on-secondary-container: rgb(194, 231, 255);
++    --cr-fallback-color-primary: var(--google-blue-400);
++    --cr-fallback-color-on-primary: var(--google-blue-900);
++    --cr-fallback-color-primary-container: var(--cmux-blue);
++    --cr-fallback-color-on-primary-container: var(--google-blue-100);
++    --cr-fallback-color-secondary-container: var(--google-blue-800);
++    --cr-fallback-color-on-secondary-container: var(--google-blue-100);
+     --cr-fallback-color-neutral-container: rgb(40, 40, 40);
+     --cr-fallback-color-neutral-outline: rgb(117, 117, 117);
+     --cr-fallback-color-surface: rgb(31, 31, 31);
+@@ -315,24 +318,24 @@ html {
+     --cr-fallback-color-surface3: rgb(51, 52, 56);
+     --cr-fallback-color-surface5: rgb(56, 58, 62);
+     --cr-fallback-color-on-surface-rgb: 227, 227, 227;
+-    --cr-fallback-color-surface-variant: rgb(68, 71, 70);
+-    --cr-fallback-color-on-surface-variant: rgb(196, 199, 197);
++    --cr-fallback-color-surface-variant: rgb(68, 68, 68);
++    --cr-fallback-color-on-surface-variant: rgb(196, 199, 196);
+     --cr-fallback-color-on-surface-subtle: rgb(199, 199, 199);
+-    --cr-fallback-color-inverse-primary: rgb(11, 87, 208);
++    --cr-fallback-color-inverse-primary: var(--cmux-blue);
+     --cr-fallback-color-inverse-surface: rgb(227, 227, 227);
+     --cr-fallback-color-inverse-on-surface: rgb(31, 31, 31);
+-    --cr-fallback-color-tonal-container: rgb(0, 74, 119);
+-    --cr-fallback-color-on-tonal-container: rgb(194, 231, 255);
+-    --cr-fallback-color-tonal-outline: rgb(4, 125, 183);
++    --cr-fallback-color-tonal-container: var(--google-blue-800);
++    --cr-fallback-color-on-tonal-container: var(--google-blue-300);
++    --cr-fallback-color-tonal-outline: var(--google-blue-500);
+     --cr-fallback-color-error: rgb(242, 184, 181);
+     --cr-fallback-color-divider: rgb(94, 94, 94);
+     --cr-fallback-color-state-hover-on-prominent_: rgba(31, 31, 31, .06);
+-    --cr-fallback-color-state-on-subtle-rgb_: 253, 252, 251;
++    --cr-fallback-color-state-on-subtle-rgb_: var(--google-blue-50-rgb);
+     --cr-fallback-color-state-hover-on-subtle_: rgba(
+         var(--cr-fallback-color-state-on-subtle-rgb_), .10);
+     --cr-fallback-color-state-ripple-neutral-on-subtle_: rgba(
+         var(--cr-fallback-color-state-on-subtle-rgb_), .16);
+-    --cr-fallback-color-state-ripple-primary-rgb_: 76, 141, 246;
++    --cr-fallback-color-state-ripple-primary-rgb_: var(--google-blue-500-rgb);
+     --cr-fallback-color-base-container: rgba(40, 40, 40, 1);
+ 
+     --cr-card-background-color: var(--google-grey-900-white-4-percent);
+diff --git a/ui/webui/resources/cr_elements/cr_toast/cr_toast.css b/ui/webui/resources/cr_elements/cr_toast/cr_toast.css
+index 7c02360..633b64e 100644
+--- a/ui/webui/resources/cr_elements/cr_toast/cr_toast.css
++++ b/ui/webui/resources/cr_elements/cr_toast/cr_toast.css
+@@ -25,9 +25,9 @@
+   box-sizing: border-box;
+   display: flex;
+   line-height: 20px;
+-  margin: 24px;
++  margin: 18px;
+   max-width: var(--cr-toast-max-width, 568px);
+-  min-height: 52px;
++  min-height: 40px;
+   min-width: 288px;
+   opacity: 0;
+   padding: 0 16px;
+diff --git a/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar.css b/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar.css
+index de24f1a..6ee0769 100644
+--- a/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar.css
++++ b/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar.css
+@@ -52,7 +52,7 @@ h1 {
+   box-sizing: border-box;
+   display: flex;
+   /* 12px to match #rightSpacer + 6px to align with icons in menus. */
+-  padding-inline-start: calc(12px + 6px);
++  padding-inline-start: 16px;
+   width: var(--cr-toolbar-left-spacer-width, auto);
+ }
+ 
+@@ -76,6 +76,7 @@ cr-icon-button {
+ 
+ #rightSpacer {
+   padding-inline-end: 12px;
++  padding-inline-start: 12px;
+ }
+ 
+ :host([narrow]) #centeredContent {
+@@ -132,12 +133,6 @@ picture {
+   margin-inline-end: 16px;
+ }
+ 
+-:host([always-show-logo]) #leftSpacer,
+-:host(:not([narrow])) #leftSpacer {
+-  /* 12px to match #rightSpacer + 9px to align with icons in menus. */
+-  padding-inline-start: calc(12px + 9px);
+-}
+-
+ :host([always-show-logo]) :is(picture, #product-logo),
+ :host(:not([narrow])) :is(picture, #product-logo) {
+   height: 24px;
+diff --git a/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar.html.ts b/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar.html.ts
+index 7eff3e7..c7de740 100644
+--- a/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar.html.ts
++++ b/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar.html.ts
+@@ -17,16 +17,6 @@ export function getHtml(this: CrToolbarElement) {
+           aria-label="${this.menuLabel || nothing}"
+           title="${this.menuLabel}">
+       </cr-icon-button>` : ''}
+-    <slot name="product-logo">
+-      <picture>
+-        <source media="(prefers-color-scheme: dark)"
+-            srcset="//resources/images/chrome_logo_dark.svg">
+-        <img id="product-logo"
+-            srcset="chrome://theme/current-channel-logo@1x 1x,
+-                    chrome://theme/current-channel-logo@2x 2x"
+-            role="presentation">
+-      </picture>
+-    </slot>
+     <h1>${this.pageName}</h1>
+   </div>
+ </div>
+diff --git a/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar_search_field.css b/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar_search_field.css
+index e557a91..8470b07 100644
+--- a/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar_search_field.css
++++ b/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar_search_field.css
+@@ -53,7 +53,7 @@ cr-icon-button {
+       var(--color-toolbar-search-field-icon,
+       var(--cr-secondary-text-color)));
+   --cr-icon-button-size: var(--cr-toolbar-icon-container-size, 28px);
+-  --cr-icon-button-icon-size: 20px;
++  --cr-icon-button-icon-size: 16px;
+   margin: var(--cr-toolbar-icon-margin, 0);
+ }
+ 
+@@ -170,7 +170,7 @@ input[type='search']::-webkit-search-cancel-button {
+   padding: 0 6px;
+   position: relative;
+   width: var(--cr-toolbar-field-width, 680px);
+-  --cr-toolbar-search-field-border-radius: 100px;
++  --cr-toolbar-search-field-border-radius: 6px;
+ }
+ 
+ @media (prefers-color-scheme: dark) {
+@@ -199,7 +199,6 @@ input[type='search']::-webkit-search-cancel-button {
+ 
+ :host([search-focused_]:not([narrow])) {
+   outline: 2px solid var(--cr-focus-outline-color);
+-  outline-offset: 2px;
+ }
+ 
+ :host(:not([narrow])) #stateBackground {
+@@ -253,4 +252,5 @@ input[type='search']::-webkit-search-cancel-button {
+   height: 100%;
+   position: relative;
+   z-index: 2;
++  gap: 6px;
+ }
+diff --git a/chrome/common/pref_names.h b/chrome/common/pref_names.h
+--- a/chrome/common/pref_names.h
++++ b/chrome/common/pref_names.h
+@@ -805,3 +805,7 @@
++// A boolean pref set to true if terminal and web contents should be shown
++// inside Helium's rounded frame.
++inline constexpr char kHeliumRoundedFrame[] = "helium.browser.rounded_frame";
++
+ // A boolean pref set to true if a Home button to open the Home pages should be
+ // visible on the toolbar.
+ inline constexpr char kShowHomeButton[] = "browser.show_home_button";
+diff --git a/chrome/browser/ui/browser_ui_prefs.cc b/chrome/browser/ui/browser_ui_prefs.cc
+--- a/chrome/browser/ui/browser_ui_prefs.cc
++++ b/chrome/browser/ui/browser_ui_prefs.cc
+@@ -116,3 +116,5 @@
++  registry->RegisterBooleanPref(prefs::kHeliumRoundedFrame, true);
++
+   registry->RegisterBooleanPref(prefs::kHomePageIsNewTabPage, true,
+                                 pref_registration_flags);
+   registry->RegisterBooleanPref(prefs::kShowHomeButton, false,

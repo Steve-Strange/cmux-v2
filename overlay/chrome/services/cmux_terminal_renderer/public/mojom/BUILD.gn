@@ -1,0 +1,9 @@
+# Copyright 2026 Manaflow, Inc.
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+import("//mojo/public/tools/bindings/mojom.gni")
+
+mojom("mojom") {
+  sources = [ "cmux_terminal_renderer.mojom" ]
+  public_deps = [ "//sandbox/policy/mojom" ]
+}

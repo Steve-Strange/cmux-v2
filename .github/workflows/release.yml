@@ -1,0 +1,43 @@
+name: desktop release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    if: vars.CMUX_RELEASES_ENABLED == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      value: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          python3 scripts/release_version.py --help >/dev/null
+          VERSION="$version" python3 - <<'PY'
+          import os
+          import sys
+          sys.path.insert(0, "scripts")
+          from release_version import parse_version
+          parse_version(os.environ["VERSION"])
+          PY
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+  build-and-publish:
+    if: vars.CMUX_RELEASES_ENABLED == 'true'
+    needs: version
+    uses: ./.github/workflows/release-build.yml
+    with:
+      version: ${{ needs.version.outputs.value }}
+      channel: stable
+      release_tag: ${{ github.ref_name }}
+    secrets: inherit

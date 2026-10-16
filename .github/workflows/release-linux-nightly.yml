@@ -1,0 +1,313 @@
+name: Linux nightly release candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cmux-linux-nightly-candidate
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      value: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          base="$(tr -d '[:space:]' < .chromium-version)"
+          patch=$((${base##*.} + RUN_NUMBER))
+          [ "$patch" -le 65535 ] || { echo 'nightly patch overflow' >&2; exit 1; }
+          echo "value=${base%.*}.${patch}" >> "$GITHUB_OUTPUT"
+
+  linux-compile:
+    needs: version
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 360
+    env:
+      CMUX_LINUX_BUILD_ROOT: /opt/cmux
+      CHROMIUM_SRC: /opt/cmux/chromium/src
+      CMUX_DEPOT_TOOLS: /opt/cmux/depot_tools
+      CMUX_RELEASE_VERSION: ${{ needs.version.outputs.value }}
+      CMUX_RELEASE_CHANNEL: nightly
+      CMUX_RELEASE_SOURCE_SHA: ${{ github.sha }}
+      CMUX_RELEASE_PHASE: all
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.15.2
+      - name: Install Linux packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils \
+            build-essential \
+            clang \
+            cmake \
+            devscripts \
+            dpkg-dev \
+            fakeroot \
+            file \
+            gzip \
+            pkg-config \
+            rsync \
+            xz-utils
+      - name: Mount revision-keyed Chromium build disk
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: cmux-browser-linux-${{ hashFiles('.chromium-version') }}
+          path: /opt/cmux
+      - name: Install cached Rust toolchain
+        env:
+          CARGO_HOME: /opt/cmux/cargo-home
+          CMUX_RUST_TOOLCHAIN: "1.96.0"
+          RUSTUP_HOME: /opt/cmux/rustup
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$CMUX_RUST_TOOLCHAIN" \
+            --profile minimal \
+            --no-self-update
+          {
+            echo "CARGO_HOME=$CARGO_HOME"
+            echo "RUSTUP_HOME=$RUSTUP_HOME"
+            echo "RUSTUP_TOOLCHAIN=$CMUX_RUST_TOOLCHAIN"
+          } >> "$GITHUB_ENV"
+      - name: Prepare pinned Linux release checkout and Ghostty library
+        run: ./scripts/bootstrap-release-linux.sh
+      - name: Compile and package Linux x64 while preserving build cache
+        id: linux_build
+        run: |
+          set +e
+          ./scripts/build-release-linux.sh
+          exit_code=$?
+          set -e
+          printf '%s\n' "$exit_code" > linux-x64-exit-code
+          if [ "$exit_code" -eq 0 ]; then
+            echo 'package_ok=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'package_ok=false' >> "$GITHUB_OUTPUT"
+            echo "::error::Linux build/package exited with $exit_code; preserving its build disk before the gate fails"
+          fi
+      - name: Upload Linux debug symbols to Sentry
+        id: sentry_upload
+        if: ${{ steps.linux_build.outputs.package_ok == 'true' }}
+        continue-on-error: true
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: aurora-7k
+          SENTRY_PROJECT: cmux-browser
+        run: |
+          set -euo pipefail
+          cli="$(./scripts/ensure-sentry-cli.sh)"
+          symbols=("$CHROMIUM_SRC/out/Release/chrome")
+          if [ -f "$CHROMIUM_SRC/out/Release/chrome_crashpad_handler" ]; then
+            symbols+=("$CHROMIUM_SRC/out/Release/chrome_crashpad_handler")
+          fi
+          test -f "${symbols[0]}"
+          "$cli" debug-files upload "${symbols[@]}"
+      - name: Upload Linux x64 artifacts
+        id: linux_artifact
+        uses: actions/upload-artifact@v4
+        if: ${{ steps.linux_build.outputs.package_ok == 'true' }}
+        continue-on-error: true
+        with:
+          name: cmux-linux-x64
+          path: |
+            release/cmux-linux-x64-installer.run
+            release/cmux-linux-x64.zip
+            release/cmux-linux-x64.deb
+            release/THIRD_PARTY_NOTICES.html
+            release/third-party-notices.spdx.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Record the downstream gate status
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          SENTRY_OUTCOME: ${{ steps.sentry_upload.outcome }}
+          ARTIFACT_OUTCOME: ${{ steps.linux_artifact.outcome }}
+        run: |
+          build_exit_code="$(cat linux-x64-exit-code 2>/dev/null || printf 255)"
+          {
+            printf 'build_exit_code=%s\n' "$build_exit_code"
+            printf 'sentry_outcome=%s\n' "$SENTRY_OUTCOME"
+            printf 'artifact_outcome=%s\n' "$ARTIFACT_OUTCOME"
+          } > linux-x64-gate-status
+      - name: Upload Linux build/package status
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-status
+          path: linux-x64-gate-status
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-x64:
+    needs: [linux-compile, version]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Download Linux build/package status
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x64-status
+          path: status
+      - name: Fail closed after the build disk is committed
+        run: |
+          set -euo pipefail
+          status_file=status/linux-x64-gate-status
+          exit_code="$(sed -n 's/^build_exit_code=//p' "$status_file")"
+          sentry_outcome="$(sed -n 's/^sentry_outcome=//p' "$status_file")"
+          artifact_outcome="$(sed -n 's/^artifact_outcome=//p' "$status_file")"
+          [ "$exit_code" = 0 ] || {
+            echo "Linux build/package failed with exit code $exit_code" >&2
+            exit 1
+          }
+          [ "$sentry_outcome" = success ] || {
+            echo "Linux Sentry symbol upload ended with $sentry_outcome" >&2
+            exit 1
+          }
+          [ "$artifact_outcome" = success ] || {
+            echo "Linux artifact upload ended with $artifact_outcome" >&2
+            exit 1
+          }
+      - name: Download and verify Linux x64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cmux-linux-x64
+          path: release
+      - run: |
+          test -s release/cmux-linux-x64-installer.run
+          test -s release/cmux-linux-x64.zip
+          test -s release/cmux-linux-x64.deb
+          test -s release/THIRD_PARTY_NOTICES.html
+          test -s release/third-party-notices.spdx.json
+
+  source:
+    needs: version
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    env:
+      CMUX_RELEASE_VERSION: ${{ needs.version.outputs.value }}
+      CMUX_RELEASE_SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install source archive compressor
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+      - name: Package exact Corresponding Source
+        run: ./scripts/build-release-source.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cmux-source
+          path: |
+            release/cmux-browser-source-*.tar.zst
+            release/corresponding-source.json
+          if-no-files-found: error
+          retention-days: 14
+
+  signed-bundle:
+    needs: [linux-x64, source, version]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    env:
+      CMUX_VERSION: ${{ needs.version.outputs.value }}
+      CMUX_RELEASE_TAG: nightly
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cmux-*
+          path: release
+          merge-multiple: true
+      - name: Sign Linux update manifest
+        env:
+          UPDATE_KEY_B64: ${{ secrets.CMUX_UPDATE_PRIVATE_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          [ -n "$UPDATE_KEY_B64" ] || {
+            echo 'CMUX_UPDATE_PRIVATE_KEY_B64 is empty' >&2
+            exit 1
+          }
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$UPDATE_KEY_B64" | base64 --decode > "$key"
+          chmod 600 "$key"
+          python3 scripts/package-update.py \
+            --version "$CMUX_VERSION" \
+            --base-url "https://github.com/manaflow-ai/cmux-v2/releases/download/nightly" \
+            --private-key "$key" \
+            --output release/update.json \
+            --artifact linux-x64=release/cmux-linux-x64.zip,cmux-browser,chrome
+      - name: Generate provenance, metadata, and checksums
+        env:
+          CMUX_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          source_archives=(release/cmux-browser-source-*.tar.zst)
+          [ "${#source_archives[@]}" -eq 1 ]
+          python3 scripts/generate-release-provenance.py \
+            --version "$CMUX_VERSION" \
+            --channel nightly \
+            --release-tag nightly \
+            --source-repository "${{ github.repository }}" \
+            --source-sha "${{ github.sha }}" \
+            --run-url "$CMUX_RUN_URL" \
+            --output release/provenance.intoto.jsonl \
+            --subject release/cmux-linux-x64-installer.run \
+            --subject release/cmux-linux-x64.zip \
+            --subject release/cmux-linux-x64.deb \
+            --subject "${source_archives[0]}" \
+            --subject release/corresponding-source.json \
+            --subject release/THIRD_PARTY_NOTICES.html \
+            --subject release/third-party-notices.spdx.json \
+            --subject release/update.json
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          Path("release/RELEASE-METADATA.json").write_text(
+              json.dumps(
+                  {
+                      "channel": "nightly",
+                      "release_tag": "nightly",
+                      "run_url": os.environ["CMUX_RUN_URL"],
+                      "source_repository": "${{ github.repository }}",
+                      "source_sha": "${{ github.sha }}",
+                      "version": os.environ["CMUX_VERSION"],
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+          (
+            cd release
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 |
+              sort -z |
+              xargs -0 sha256sum |
+              sed 's#  \./#  #' > SHA256SUMS
+          )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cmux-linux-nightly-release
+          path: release/
+          if-no-files-found: error
+          retention-days: 14

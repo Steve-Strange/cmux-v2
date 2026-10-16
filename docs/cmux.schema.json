@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/manaflow-ai/cmux-browser/main/docs/cmux.schema.json",
+  "title": "cmux configuration",
+  "type": "object",
+  "properties": {
+    "$schema": {"type": "string"},
+    "app": {
+      "type": "object",
+      "properties": {
+        "sendAnonymousTelemetry": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send anonymous daily/hourly activity and native crash reports. Activity events contain no user content. Crash reports include process/stack state and limited memory around crashing threads, which can contain in-memory content fragments."
+        }
+      },
+      "additionalProperties": true
+    },
+    "browser": {
+      "type": "object",
+      "properties": {
+        "newTabPage": {"enum": ["blank", "new_tab"]}
+      },
+      "additionalProperties": true
+    },
+    "keyboard": {
+      "type": "object",
+      "properties": {
+        "modifierScheme": {
+          "enum": [
+            "command-tabs-control-workspaces",
+            "control-tabs-command-workspaces"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "keybindings": {
+      "type": "array",
+      "description": "VS Code-compatible keybinding rules, evaluated from bottom to top.",
+      "items": {"$ref": "#/$defs/keybinding"}
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "keybinding": {
+      "type": "object",
+      "required": ["key", "command"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "One key chord, or two chords separated by a space. Scan-code keys such as [Slash] are accepted."
+        },
+        "command": {
+          "type": "string",
+          "description": "A cmux command ID. Prefix with - to remove a matching default; use an empty string to consume the key without an action."
+        },
+        "when": {
+          "type": "string",
+          "description": "Conditional expression over cmux context keys."
+        },
+        "args": {
+          "description": "JSON arguments passed to the command."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

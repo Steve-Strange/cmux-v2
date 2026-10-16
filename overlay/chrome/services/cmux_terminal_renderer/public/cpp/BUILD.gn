@@ -1,0 +1,32 @@
+# Copyright 2026 Manaflow, Inc.
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Dependency-neutral terminal-host framing and renderer stream validation.
+# Both the browser capability broker and the one-terminal utility process link
+# this exact implementation; neither side carries a forked wire parser.
+source_set("terminal_host_protocol") {
+  sources = [
+    "cmux_terminal_host_protocol.cc",
+    "cmux_terminal_host_protocol.h",
+    "cmux_terminal_host_socket.cc",
+    "cmux_terminal_host_socket.h",
+    "cmux_terminal_host_stream.cc",
+    "cmux_terminal_host_stream.h",
+  ]
+}
+
+source_set("terminal_input_cutover") {
+  sources = [
+    "cmux_terminal_input_cutover.cc",
+    "cmux_terminal_input_cutover.h",
+  ]
+}
+
+source_set("ghostty_resources") {
+  sources = [
+    "cmux_ghostty_resources.cc",
+    "cmux_ghostty_resources.h",
+    "cmux_ghostty_resources_platform.cc",
+  ]
+  deps = [ "//base" ]
+}

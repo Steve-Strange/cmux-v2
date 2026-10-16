@@ -1,0 +1,22 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=cmux
+GenericName=Web Browser and Terminal
+Comment=Browse the web and run terminals in one workspace
+Exec=cmux-browser %U
+Icon=cmux-browser
+StartupNotify=true
+Terminal=false
+Categories=Network;WebBrowser;Development;TerminalEmulator;
+Keywords=browser;web;terminal;shell;developer;
+MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xhtml+xml;application/xml;image/gif;image/jpeg;image/png;image/webp;text/html;text/xml;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/cmux;
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=cmux-browser --new-window
+
+[Desktop Action new-private-window]
+Name=New Incognito Window
+Exec=cmux-browser --incognito

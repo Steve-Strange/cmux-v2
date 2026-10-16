@@ -1,0 +1,97 @@
+name: updater
+
+on:
+  push:
+    paths:
+      - "overlay/chrome/browser/cmux_term/cmux_update_*"
+      - "scripts/*update*"
+      - "scripts/run-host-tests.sh"
+      - ".github/workflows/updater.yml"
+      - "scripts/*release*"
+      - "scripts/*ghostty*"
+      - "scripts/local-builder-transport.sh"
+      - ".chromium-version"
+      - ".github/actionlint.yaml"
+      - ".github/workflows/release*.yml"
+      - ".github/workflows/nightly.yml"
+  pull_request:
+    paths:
+      - "overlay/chrome/browser/cmux_term/cmux_update_*"
+      - "scripts/*update*"
+      - "scripts/run-host-tests.sh"
+      - ".github/workflows/updater.yml"
+      - "scripts/*release*"
+      - "scripts/*ghostty*"
+      - "scripts/local-builder-transport.sh"
+      - ".chromium-version"
+      - ".github/actionlint.yaml"
+      - ".github/workflows/release*.yml"
+      - ".github/workflows/nightly.yml"
+
+jobs:
+  release-protocol:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - blacksmith-6vcpu-macos-15
+          - blacksmith-2vcpu-windows-2025
+          - blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/test-updater.py
+      - if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/stress-updater-windows.ps1 -Iterations 25
+
+  policy-model:
+    strategy:
+      matrix:
+        os:
+          - blacksmith-6vcpu-macos-15
+          - blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: ITERATIONS=5 ./scripts/stress-updater.sh
+
+  release-pipeline:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LLD for the Ghostty symbol-isolation regression
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lld
+      - run: python3 scripts/test-release-pipeline.py
+      - run: python3 scripts/test-prepare-ghostty-linux-pic.py
+      - run: ./scripts/test-ghostty-linux-symbol-isolation.sh
+      - run: python3 scripts/test-release-provenance.py
+      - run: python3 scripts/test-linux-nightly-publication.py
+      - run: ./scripts/test-bootstrap-release-linux.sh
+      - run: python3 scripts/test-linux-release-compliance.py
+      - run: ./scripts/test-linux-user-installer.sh
+      - run: ./scripts/test-release-source.sh
+      - run: |
+          bash -n scripts/bootstrap-release-linux.sh \
+            scripts/build-linux-user-installer.sh \
+            scripts/build-release-linux.sh \
+            scripts/build-release-macos-hq.sh \
+            scripts/build-release-macos.sh \
+            scripts/build-release-source.sh \
+            scripts/local-builder-transport.sh \
+            scripts/notarize-release-macos.sh \
+            scripts/publish-linux-nightly-release.sh \
+            scripts/stamp-release-macos.sh \
+            scripts/test-linux-user-installer.sh \
+            scripts/vendor-ghostty-linux-local.sh
+
+  macos-release-packaging:
+    runs-on: blacksmith-6vcpu-macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/test-macos-release.sh

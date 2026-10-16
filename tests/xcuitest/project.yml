@@ -1,0 +1,32 @@
+name: CmuxUITests
+options:
+  bundleIdPrefix: com.cmux
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    # A real local development signature keeps macOS Gatekeeper from killing
+    # the generated XCTRunner before it can connect to testmanagerd. Ad-hoc
+    # signing is insufficient when Automation Mode is not globally enabled.
+    CODE_SIGN_IDENTITY: "Apple Development"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGNING_REQUIRED: "YES"
+    CODE_SIGNING_ALLOWED: "YES"
+    SWIFT_VERSION: "5.0"
+targets:
+  CmuxUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [Sources]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cmux.CmuxUITests
+        GENERATE_INFOPLIST_FILE: "YES"
+schemes:
+  CmuxUITests:
+    build:
+      targets:
+        CmuxUITests: all
+    test:
+      targets: [CmuxUITests]
+      gatherCoverageData: false

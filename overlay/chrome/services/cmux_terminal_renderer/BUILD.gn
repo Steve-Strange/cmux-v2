@@ -1,0 +1,25 @@
+# Copyright 2026 Manaflow, Inc.
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+source_set("cmux_terminal_renderer") {
+  sources = [
+    "cmux_terminal_ingress_drain_queue.h",
+    "cmux_terminal_output_drain_queue.h",
+    "cmux_terminal_renderer_service.h",
+    "cmux_terminal_renderer_service.mm",
+    "cmux_terminal_tick_coalescer.h",
+  ]
+
+  configs += [ "//chrome/browser/cmux_term:ghostty_public_config" ]
+  public_configs = [ "//chrome/browser/cmux_term:ghostty_public_config" ]
+
+  deps = [
+    "//base",
+    "//chrome/services/cmux_terminal_renderer/public/cpp:ghostty_resources",
+    "//chrome/services/cmux_terminal_renderer/public/cpp:terminal_input_cutover",
+    "//chrome/services/cmux_terminal_renderer/public/cpp:terminal_host_protocol",
+    "//chrome/services/cmux_terminal_renderer/public/mojom",
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/cpp/platform",
+  ]
+}
