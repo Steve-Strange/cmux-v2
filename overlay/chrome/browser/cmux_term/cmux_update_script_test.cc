@@ -12,7 +12,9 @@
 #include <thread>
 
 #if !defined(_WIN32)
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -99,6 +101,41 @@ int main() {
     }
   }
   Check(!backup_remains, "POSIX installer removed its rollback copy");
+#if defined(__linux__)
+  // Reproduce a persistent PTY daemon surviving the browser update. Its old
+  // executable path must still work when it spawns another terminal host.
+  std::filesystem::create_directories(staged);
+  std::filesystem::copy_file("/bin/sleep", current / "cmux-tui");
+  std::filesystem::copy_file(current / "cmux-browser",
+                             staged / "cmux-browser");
+  const pid_t daemon = fork();
+  Check(daemon >= 0, "started a persistent backend fixture");
+  if (daemon == 0) {
+    execl((current / "cmux-tui").c_str(), "cmux-tui", "30", nullptr);
+    _exit(127);
+  }
+  const auto proc_exe = std::filesystem::path("/proc") /
+                        std::to_string(daemon) / "exe";
+  bool started = false;
+  for (int attempt = 0; attempt < 100; ++attempt) {
+    std::error_code error;
+    if (std::filesystem::read_symlink(proc_exe, error) == current / "cmux-tui") {
+      started = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  Check(started, "backend fixture runs from the old install");
+  Check(std::system(command.c_str()) == 0,
+        "update completed with an active backend");
+  const auto retained_exe = std::filesystem::read_symlink(proc_exe);
+  Check(std::filesystem::exists(retained_exe),
+        "active backend executable retained after update");
+  Check(std::system(("'" + retained_exe.string() + "' 0").c_str()) == 0,
+        "old backend can still spawn a host from its executable path");
+  kill(daemon, SIGTERM);
+  waitpid(daemon, nullptr, 0);
+#endif
   std::filesystem::remove_all(test_root);
 #endif
 

@@ -81,6 +81,13 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/cmux-linux-install.XXXXXX")"
 backup="${install_root}.cmux-old.$$"
 had_previous=0
 promoted=0
+backup_in_use() {
+  for executable in /proc/[0-9]*/exe; do
+    target=$(readlink "$executable" 2>/dev/null) || continue
+    case "$target" in "$backup"/*) return 0 ;; esac
+  done
+  return 1
+}
 cleanup() {
   rc=$?
   trap - EXIT INT TERM
@@ -91,7 +98,7 @@ cleanup() {
     fi
   fi
   rm -rf -- "$work"
-  if [ -e "$backup" ]; then
+  if [ -e "$backup" ] && ! backup_in_use; then
     rm -rf -- "$backup"
   fi
   exit "$rc"
@@ -140,7 +147,7 @@ if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$(dirname "$desktop_file")" >/dev/null 2>&1 || true
 fi
 
-if [ "$had_previous" -eq 1 ]; then
+if [ "$had_previous" -eq 1 ] && ! backup_in_use; then
   rm -rf -- "$backup"
 fi
 promoted=0

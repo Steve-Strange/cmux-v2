@@ -3,7 +3,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/cmux-linux-installer-test.XXXXXX")"
-trap 'rm -rf "$TMP"' EXIT
+cmux_test_backend=
+cleanup() {
+  if [ -n "$cmux_test_backend" ]; then
+    kill "$cmux_test_backend" 2>/dev/null || true
+    wait "$cmux_test_backend" 2>/dev/null || true
+  fi
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
 
 make_fixture() {
   local version="$1"
@@ -50,6 +58,26 @@ CMUX_LINUX_INSTALLER_OUTPUT="$TMP/cmux-linux-x64-installer.run" \
 run_installer
 test "$("$TMP/home/opt/cmux-browser-nightly/chrome")" = v2
 test -z "$(find "$TMP/home/opt" -maxdepth 1 -name '*.cmux-old.*' -print)"
+
+# A headless PTY backend can outlive its browser. Reinstalling must leave its
+# current_exe() path executable so creating another terminal still works.
+cp /bin/sleep "$TMP/home/opt/cmux-browser-nightly/cmux-tui"
+"$TMP/home/opt/cmux-browser-nightly/cmux-tui" 30 &
+cmux_test_backend=$!
+for attempt in {1..100}; do
+  if [ "$(readlink "/proc/$cmux_test_backend/exe")" = \
+       "$TMP/home/opt/cmux-browser-nightly/cmux-tui" ]; then
+    break
+  fi
+  sleep 0.01
+done
+run_installer
+retained_exe="$(readlink "/proc/$cmux_test_backend/exe")"
+test -x "$retained_exe"
+"$retained_exe" 0
+kill "$cmux_test_backend"
+wait "$cmux_test_backend" 2>/dev/null || true
+cmux_test_backend=
 
 if HOME="$TMP/home" \
     CMUX_INSTALL_DIR=/ \

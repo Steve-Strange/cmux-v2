@@ -34,6 +34,19 @@ try {
   const char* relaunch = platform == UpdateInstallPlatform::kMac
                              ? "open \"$current\""
                              : "nohup \"$current/$relaunch\" >/dev/null 2>&1 &";
+  const char* cleanup = platform == UpdateInstallPlatform::kLinux
+      ? R"SHELL(  # The browser can exit while its PTY daemon and hosts stay alive.
+  # current_exe() in that daemon must remain executable for new terminals.
+  in_use=0
+  for executable in /proc/[0-9]*/exe; do
+    target=$(readlink "$executable" 2>/dev/null) || continue
+    case "$target" in "$backup"/*) in_use=1; break ;; esac
+  done
+  if [ "$in_use" -eq 0 ]; then
+    rm -rf -- "$backup"
+  fi
+)SHELL"
+      : "  rm -rf -- \"$backup\"\n";
   return std::string(R"SHELL(#!/bin/sh
 set -eu
 parent_pid="$1"
@@ -48,9 +61,7 @@ done
 backup="${current}.cmux-old.$$"
 mv -- "$current" "$backup"
 if mv -- "$staged" "$current"; then
-  )SHELL") + relaunch + R"SHELL(
-  rm -rf -- "$backup"
-else
+  )SHELL") + relaunch + "\n" + cleanup + R"SHELL(else
   mv -- "$backup" "$current"
   exit 1
 fi
