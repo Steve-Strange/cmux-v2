@@ -357,6 +357,20 @@ class CmuxUpdateServiceImpl {
   ~CmuxUpdateServiceImpl() = default;
 
   void Start() {
+    base::ThreadPool::PostTaskAndReplyWithResult(
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+        base::BindOnce(&IsLocalCmuxBuild),
+        base::BindOnce(&CmuxUpdateServiceImpl::OnLocalBuildChecked,
+                       weak_factory_.GetWeakPtr()));
+  }
+
+  void OnLocalBuildChecked(bool is_local) {
+    // Local repair packages have their own source and deployment lifecycle.
+    // Do not offer an upstream binary that silently discards those patches.
+    if (is_local) {
+      LOG(INFO) << "cmux-update: local build; official updates disabled";
+      return;
+    }
     network_monitor_->Start(base::BindRepeating(
         &CmuxUpdateServiceImpl::OnConnectionCost, weak_factory_.GetWeakPtr()));
     check_timer_.Start(FROM_HERE, kCheckInterval, this,

@@ -17,6 +17,7 @@ struct ReadyUpdate {
 };
 
 // Blocking filesystem preflight; call on a MayBlock sequence.
+bool IsLocalCmuxBuild();
 bool CurrentInstallCanBeReplaced();
 
 // Writes a detached, platform-native swap helper and starts it. The helper

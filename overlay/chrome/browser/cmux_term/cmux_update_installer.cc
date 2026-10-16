@@ -38,13 +38,24 @@ base::FilePath CurrentInstallRoot() {
 
 }  // namespace
 
+bool IsLocalCmuxBuild() {
+  const base::FilePath current = CurrentInstallRoot();
+  return !current.empty() &&
+         base::PathExists(current.AppendASCII("cmux-local-build.json"));
+}
+
 bool CurrentInstallCanBeReplaced() {
   const base::FilePath current = CurrentInstallRoot();
-  return !current.empty() && base::PathExists(current) &&
+  return !IsLocalCmuxBuild() && !current.empty() && base::PathExists(current) &&
          base::PathIsWritable(current.DirName());
 }
 
 bool LaunchReadyUpdateInstaller(const ReadyUpdate& update) {
+  // A verified official package can still regress a locally repaired build.
+  // Recheck at handoff, including when an update was staged earlier.
+  if (IsLocalCmuxBuild()) {
+    return false;
+  }
   const base::FilePath current = CurrentInstallRoot();
   if (current.empty() || update.staged_root.empty() ||
       !base::PathExists(update.staged_root)) {

@@ -410,6 +410,11 @@ if '# cmux cross-platform' in s:
          f'      {quote}cmux_term/cmux_terminal_pane_linux.cc{quote},\n'),
     ]
     for source, anchor in platform_sources:
+        # A Linux source snapshot never received the macOS-only source block.
+        # Do not require its anchors when reapplying the Linux overlay.
+        if MODE != 'full' and (source.endswith('.mm') or
+                               source == 'cmux_term/cmux_app_icon.h'):
+            continue
         source_scope = s
         if source == 'cmux_term/cmux_ghostty_opengl_host.cc':
             linux_start = s.index(
@@ -1728,7 +1733,7 @@ new = '''  if (allow_user_level_hosts) {
     result = FindManifestInDir(chrome::DIR_NATIVE_MESSAGING, host_name);
   }
 '''
-if 'tools such as Claude Code install native host manifests' not in s:
+if '// cmux uses its own product/profile directory' not in s:
     assert s.count(old) == 1, 'native host fallback anchor changed'
     s = s.replace(old, new, 1)
 open(p, 'w').write(s)

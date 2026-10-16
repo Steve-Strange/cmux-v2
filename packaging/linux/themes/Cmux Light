@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# A simple high-contrast palette for the local Linux package.
+background = #f5f6f8
+foreground = #242a34
+cursor-color = #242a34
+selection-background = #c8d9f0
+selection-foreground = #172336
+palette = 0=#242a34
+palette = 1=#aa2936
+palette = 2=#35703b
+palette = 3=#825f13
+palette = 4=#285c9e
+palette = 5=#7c4698
+palette = 6=#246d77
+palette = 7=#c6cbd3
+palette = 8=#647080
+palette = 9=#be3443
+palette = 10=#437d46
+palette = 11=#92701c
+palette = 12=#326caf
+palette = 13=#8d53a8
+palette = 14=#287d88
+palette = 15=#ffffff
