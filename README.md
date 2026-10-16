@@ -1,5 +1,7 @@
 # cmux-browser
 
+Community Linux repair details and validation: [Linux repairs](docs/linux-repair.md).
+
 A Chromium fork that is one app: real Chrome web tabs + omnibar (unmodified engine UX), our own custom browser UI on top, and **Ghostty terminals as first-class surfaces** in the same window/compositor.
 
 This is the alternate to [cmux-owl](https://github.com/manaflow-ai/cmux-owl). OWL kept Chromium out-of-process and read pixels back into a Swift shell; every UX rough edge lived in that readback seam. cmux-browser deletes the seam by building our UI and the terminal directly into the Chromium browser process, so web rendering, resize, input, IME, and the omnibar are Chrome-quality for free. The cost is maintaining a browser-UI fork. See [docs/DESIGN.md](docs/DESIGN.md).
