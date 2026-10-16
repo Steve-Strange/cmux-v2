@@ -6,11 +6,14 @@
 #include <algorithm>
 #include <atomic>
 #include <limits>
+#include <map>
 #include <utility>
 
 #include "base/check.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
+#include "base/no_destructor.h"
+#include "base/synchronization/lock.h"
 
 #if BUILDFLAG(IS_LINUX)
 #include <dlfcn.h>
@@ -46,6 +49,49 @@ uint32_t ClampDimension(uint32_t value) {
 
 #if BUILDFLAG(IS_LINUX)
 
+// eglInitialize is idempotent, not reference counted. All panes can receive
+// the same EGLDisplay, so terminating it when any one pane closes invalidates
+// the contexts of every other pane. Serialize initialization and termination
+// and release the connection only after its last host has gone away.
+class EGLDisplayRegistry {
+ public:
+  bool Acquire(EGLDisplay display) {
+    if (display == EGL_NO_DISPLAY) {
+      return false;
+    }
+    base::AutoLock lock(lock_);
+    auto existing = users_.find(display);
+    if (existing != users_.end()) {
+      ++existing->second;
+      return true;
+    }
+    if (eglInitialize(display, nullptr, nullptr) != EGL_TRUE) {
+      return false;
+    }
+    users_.emplace(display, 1);
+    return true;
+  }
+
+  void Release(EGLDisplay display) {
+    base::AutoLock lock(lock_);
+    auto existing = users_.find(display);
+    CHECK(existing != users_.end());
+    if (--existing->second == 0) {
+      eglTerminate(display);
+      users_.erase(existing);
+    }
+  }
+
+ private:
+  base::Lock lock_;
+  std::map<EGLDisplay, size_t> users_ GUARDED_BY(lock_);
+};
+
+EGLDisplayRegistry& GetEGLDisplayRegistry() {
+  static base::NoDestructor<EGLDisplayRegistry> registry;
+  return *registry;
+}
+
 class LinuxOpenGLHost final : public CmuxGhosttyOpenGLHost {
  public:
   LinuxOpenGLHost(uint32_t width,
@@ -64,10 +110,14 @@ class LinuxOpenGLHost final : public CmuxGhosttyOpenGLHost {
       if (surface_ != EGL_NO_SURFACE) {
         eglDestroySurface(display_, surface_);
       }
-      eglTerminate(display_);
+      GetEGLDisplayRegistry().Release(display_);
     }
     if (lib_gl_) {
-      dlclose(lib_gl_);
+      // The loader can free its handle inside dlclose. Release the tracked
+      // reference first so the member does not become a dangling raw_ptr.
+      void* library = lib_gl_.get();
+      lib_gl_ = nullptr;
+      dlclose(library);
     }
   }
 
@@ -86,15 +136,14 @@ class LinuxOpenGLHost final : public CmuxGhosttyOpenGLHost {
                                           EGL_DEFAULT_DISPLAY),
                                       nullptr);
       if (display_ != EGL_NO_DISPLAY &&
-          eglInitialize(display_, nullptr, nullptr) != EGL_TRUE) {
+          !GetEGLDisplayRegistry().Acquire(display_)) {
         display_ = EGL_NO_DISPLAY;
       }
     }
 #endif
     if (display_ == EGL_NO_DISPLAY) {
       display_ = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-      if (display_ == EGL_NO_DISPLAY ||
-          eglInitialize(display_, nullptr, nullptr) != EGL_TRUE) {
+      if (!GetEGLDisplayRegistry().Acquire(display_)) {
         LOG(ERROR) << "cmux-term: unable to initialize an EGL display";
         display_ = EGL_NO_DISPLAY;
         return false;

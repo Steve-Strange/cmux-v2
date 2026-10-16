@@ -1470,7 +1470,15 @@ std::vector<KeyRule> DefaultKeymapRules(bool is_mac,
           ? "alt"
           : "mod";
 
-  AddDefault(&rules, "mod+b", "sidebar.toggle");
+  // Plain Control chords belong to readline/tmux when a Linux terminal has
+  // focus. Browser chrome remains available via the explicit Ctrl+Alt chords.
+  AddDefault(&rules, "ctrl+,", "app.settings", "isLinux");
+  const char* browser_control = "!(isLinux && terminalFocused)";
+  AddDefault(&rules, "ctrl+alt+b", "tab.newWeb", "isLinux && terminalFocused");
+  AddDefault(&rules, "ctrl+alt+d", "pane.splitRight", "isLinux && terminalFocused");
+  AddDefault(&rules, "ctrl+alt+w", "tab.close", "isLinux && terminalFocused");
+  AddDefault(&rules, "ctrl+alt+l", "omnibox.focus", "isLinux && terminalFocused");
+  AddDefault(&rules, "mod+b", "sidebar.toggle", browser_control);
   AddDefault(&rules, "mod+z", "edit.undo");
   AddDefault(&rules, "mod+shift+z", "edit.redo");
   AddDefault(&rules, "mod+x", "edit.cut");
@@ -1480,7 +1488,7 @@ std::vector<KeyRule> DefaultKeymapRules(bool is_mac,
   AddDefault(&rules, "mod+shift+n", "window.new");
   AddDefault(&rules, "mod+shift+w", "window.close");
   AddDefault(&rules, "mod+shift+enter", "window.toggleFullscreen");
-  AddDefault(&rules, WithModifier(tab_modifier, "t"), "tab.newWeb");
+  AddDefault(&rules, WithModifier(tab_modifier, "t"), "tab.newWeb", browser_control);
   if (is_mac && tab_modifier != "mod") {
     AddDefault(&rules, "cmd+t", "tab.newWeb");
   }
@@ -1493,16 +1501,16 @@ std::vector<KeyRule> DefaultKeymapRules(bool is_mac,
     AddDefault(&rules, "ctrl+shift+t", "tab.restore");
     AddDefault(&rules, "ctrl+alt+t", "tab.newTerminal");
   }
-  AddDefault(&rules, "mod+d", "pane.splitRight");
+  AddDefault(&rules, "mod+d", "pane.splitRight", browser_control);
   AddDefault(&rules, "mod+shift+d", "pane.splitDown");
-  AddDefault(&rules, "mod+n", "column.new");
+  AddDefault(&rules, "mod+n", "column.new", browser_control);
   AddDefault(&rules, WithModifier(workspace_modifier, "shift+m"),
              "workspace.toggleLayout");
-  AddDefault(&rules, WithModifier(tab_modifier, "w"), "tab.close");
-  AddDefault(&rules, "mod+l", "omnibox.focus");
-  AddDefault(&rules, "mod+r", "page.reload");
-  AddDefault(&rules, "mod+[", "page.back");
-  AddDefault(&rules, "mod+]", "page.forward");
+  AddDefault(&rules, WithModifier(tab_modifier, "w"), "tab.close", browser_control);
+  AddDefault(&rules, "mod+l", "omnibox.focus", browser_control);
+  AddDefault(&rules, "mod+r", "page.reload", browser_control);
+  AddDefault(&rules, "mod+[", "page.back", browser_control);
+  AddDefault(&rules, "mod+]", "page.forward", browser_control);
   AddDefault(&rules, "mod+=", "zoom.in", "!terminalFocused");
   AddDefault(&rules, "mod+plus", "zoom.in", "!terminalFocused");
   AddDefault(&rules, "mod+-", "zoom.out", "!terminalFocused");

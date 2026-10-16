@@ -492,6 +492,7 @@ enum class CommandAction {
   kWorkspaceJump9,
   kKeymapReload,
   kThemeReload,
+  kSettingsOpen,
   kWindowNew,
   kWindowClose,
   kWindowToggleFullscreen,
@@ -561,6 +562,7 @@ constexpr CommandSpec kCommandSpecs[] = {
     {"workspace.jump9", CommandAction::kWorkspaceJump9, false},
     {"keymap.reload", CommandAction::kKeymapReload, false},
     {"theme.reload", CommandAction::kThemeReload, false},
+    {"app.settings", CommandAction::kSettingsOpen, false},
     {"window.new", CommandAction::kWindowNew, false},
     {"window.close", CommandAction::kWindowClose, false},
     {"window.toggleFullscreen", CommandAction::kWindowToggleFullscreen, false},
@@ -1930,6 +1932,10 @@ class CmuxWindowView : public views::View,
     for (PaneId pane_id : pane_ids) {
       DestroyPaneView(pane_id, /*notify_focus=*/false);
     }
+    // OnWindowClosing can synchronously delete the Browser-owned pages. Drop
+    // our non-owning indices before that, rather than in member destruction.
+    web_contents_by_surface_.clear();
+    web_tab_placements_.clear();
     for (const auto& [workspace, browser] : workspace_browsers_) {
       UnregisterCmuxBrowserWindowHost(native_window_, workspace);
       if (browser) {
@@ -3418,6 +3424,13 @@ class CmuxWindowView : public views::View,
       ++pending_terminal_columns_;
       return;
     }
+    // Startup restoration owns an empty pane, not a placeholder web tab.
+    for (PaneId empty : model_.PanesOf(ws_)) {
+      if (model_.FindPane(ws_, empty)->tabs.empty()) {
+        NewTabInPane(empty, SurfaceKind::kTerminal);
+        return;
+      }
+    }
     PaneId pane = model_.AddColumn(ws_, SurfaceKind::kTerminal);
     if (pane == kInvalidId) {
       return;
@@ -4431,6 +4444,10 @@ class CmuxWindowView : public views::View,
 
   RailConfig EffectiveRailConfig() const {
     RailConfig config = base_rail_config_;
+    if (layout_config_.ui_font_size > 0) {
+      config.font_size = layout_config_.ui_font_size;
+      config.row_height = std::max(config.row_height, config.font_size + 12);
+    }
     if (SidebarOnRight()) {
       // macOS window controls remain on the left edge; a right-hand rail does
       // not need their reserved header width.
@@ -4566,6 +4583,7 @@ class CmuxWindowView : public views::View,
       pane_theme_colors_.idle_border = SkColorFromThemeArgb(p.pane_idle_border);
     }
 
+    tab_theme_colors_.font_size = layout_config_.ui_font_size;
     tab_theme_colors_.accent = EffectiveAccentColor();
     pane_theme_colors_.focus_border = EffectiveFocusColor();
     SetCmuxChromeSurfaceColors(chrome_surface_colors_);
@@ -4697,6 +4715,9 @@ class CmuxWindowView : public views::View,
     }
     const bool enabled = GhosttyThemeEnabled();
     if (enabled && theme.has_value()) {
+#if BUILDFLAG(IS_LINUX)
+      ApplyCmuxLinuxTerminalTheme(*theme);
+#endif
       active_theme_palette_ = DeriveUiPalette(*theme);
       active_theme_name_ = layout_config_.ghostty_theme_name;
     } else {
@@ -5045,7 +5066,8 @@ class CmuxWindowView : public views::View,
     const SkColor accent_color = EffectiveAccentColor();
     const SkColor drop_highlight_color = EffectiveDropHighlightColor();
     const SkColor focus_color = EffectiveFocusColor();
-    if (applied_rail_header_height_ != header_height ||
+    if (applied_ui_font_size_ != layout_config_.ui_font_size ||
+        applied_rail_header_height_ != header_height ||
         applied_sidebar_position_ != layout_config_.sidebar_position ||
         applied_animations_ != animations ||
         applied_animation_ms_ != animation_ms ||
@@ -5065,6 +5087,7 @@ class CmuxWindowView : public views::View,
       for (auto& kv : views_) {
         ApplyAnimationConfigToPane(kv.second);
       }
+      applied_ui_font_size_ = layout_config_.ui_font_size;
       applied_rail_header_height_ = header_height;
       applied_sidebar_position_ = layout_config_.sidebar_position;
       applied_animations_ = animations;
@@ -5391,7 +5414,8 @@ class CmuxWindowView : public views::View,
   void NewTabInPane(PaneId pane_id,
                     SurfaceKind kind,
                     std::string terminal_command = std::string(),
-                    std::string title = std::string()) {
+                    std::string title = std::string(),
+                    GURL web_url = GURL()) {
     CmuxPaneView* view = ViewForPane(pane_id);
     if (!view) {
       return;
@@ -5400,7 +5424,7 @@ class CmuxWindowView : public views::View,
     if (tab == kInvalidId) {
       return;
     }
-    CreateSurfaceForTab(view, tab, kind, GURL(), terminal_command);
+    CreateSurfaceForTab(view, tab, kind, web_url, terminal_command);
     RefreshPaneTabs(pane_id);
     if (kind == SurfaceKind::kWeb) {
       FocusNewWebTab(pane_id, tab);
@@ -6246,11 +6270,6 @@ class CmuxWindowView : public views::View,
     }
     const WorkspaceId workspace = location->first;
     const PaneId pane_id = location->second;
-    if (!EnsureWebFallbackForTerminal(pane_id, tab)) {
-      LOG(ERROR) << "cmux-views: canonical terminal removal could not create "
-                    "a web fallback";
-      return;
-    }
     CmuxPaneView* view = ViewForPane(pane_id);
     if (view) {
       view->RemoveSurface(tab);
@@ -6259,7 +6278,7 @@ class CmuxWindowView : public views::View,
     // Canonical Remove is projection-only. Never call backend->Close(): the
     // registry has already committed the tombstone/absence.
     terminal_backends_.erase(backend_it);
-    model_.CloseTab(workspace, pane_id, tab);
+    model_.RemoveProjectedTab(workspace, pane_id, tab);
     if (model_.FindPane(workspace, pane_id)) {
       RefreshPaneTabs(pane_id);
       if (workspace == ws_) {
@@ -6937,6 +6956,24 @@ class CmuxWindowView : public views::View,
       case CommandAction::kKeymapReload:
         ReloadKeymap();
         return true;
+      case CommandAction::kSettingsOpen: {
+        for (PaneId pane_id : model_.PanesOf(ws_)) {
+          const Pane* pane = model_.FindPane(ws_, pane_id);
+          for (const SurfaceTab& tab : pane->tabs) {
+            content::WebContents* contents = WebContentsForSurface(tab.id);
+            if (contents && (contents->GetVisibleURL().host() == "cmux-configure" ||
+                contents->GetVisibleURL() == GURL("cmux://settings/"))) {
+              model_.SelectTab(ws_, pane_id, tab.id);
+              RefreshPaneTabs(pane_id);
+              focus_.FocusPane(pane_id, /*move_keyboard=*/true);
+              return true;
+            }
+          }
+        }
+        NewTabInPane(FocusedPane(), SurfaceKind::kWeb, std::string(),
+                     std::string(), GURL("cmux://settings/"));
+        return true;
+      }
       case CommandAction::kThemeReload:
         ReloadTheme();
         return true;
@@ -7263,7 +7300,7 @@ class CmuxWindowView : public views::View,
 
  public:
   void InitializeStartupTab(const std::optional<GURL>& startup_url) {
-    pending_startup_tab_ = true;
+    pending_startup_tab_ = startup_url.has_value();
     pending_startup_url_ = startup_url;
     RunPendingStartupContentIfReady();
   }
@@ -7295,7 +7332,12 @@ class CmuxWindowView : public views::View,
       }
     }
     if (!pane || !tab || tab->kind != SurfaceKind::kWeb) {
-      return;
+      if (startup_url && startup_url->is_valid()) {
+        NewTab(SurfaceKind::kWeb);
+        pane = model_.FindPane(ws_, FocusedPane());
+        tab = pane ? pane->FindTab(pane->selected) : nullptr;
+      }
+      if (!pane || !tab || tab->kind != SurfaceKind::kWeb) return;
     }
     if (startup_url && startup_url->is_valid() && !startup_url->is_empty()) {
       if (content::WebContents* contents = WebContentsForSurface(tab->id)) {
@@ -9409,8 +9451,8 @@ class CmuxWindowView : public views::View,
     // workspace below is materialized from a canonical UUID.
     if (!registry_bootstrapped_ && snapshot.workspaces.empty() &&
         model_.workspace_count() == 0) {
-      const WorkspaceId home = model_.AddWorkspace(
-          SurfaceKind::kWeb, "Home", NewWorkspaceRegistryKey());
+      const WorkspaceId home = model_.AddEmptyWorkspace(
+          "Home", NewWorkspaceRegistryKey());
       CHECK_NE(home, kInvalidId);
       pending_workspace_mutations_.RememberCreate(
           WorkspaceRegistryKey(home), NewWorkspaceMutationId());
@@ -9418,10 +9460,7 @@ class CmuxWindowView : public views::View,
       ws_ = home;
       model_.SelectWorkspace(home);
       EnsureActivePanesRealized();
-      // Seed one terminal only for a confirmed brand-new registry. On every
-      // later launch the canonical terminal registry is authoritative; an
-      // unconditional startup column would create another durable terminal on
-      // each restart and make Browser a second lifecycle writer.
+      // Wait for workspace registration before creating its first terminal.
       pending_terminal_columns_ = 1;
     }
     registry_bootstrapped_ = true;
@@ -9439,7 +9478,7 @@ class CmuxWindowView : public views::View,
     for (const CmuxCanonicalWorkspace& remote : plan.materialize) {
       if (!model_.FindWorkspaceByRegistryKey(remote.key)) {
         const WorkspaceId added =
-            model_.AddWorkspace(SurfaceKind::kWeb, remote.name, remote.key);
+            model_.AddEmptyWorkspace(remote.name, remote.key);
         CHECK(native_window_registry_->RegisterWorkspace(
             WorkspaceLocator{native_window_, added}));
         CreateBrowserForWorkspace(added);
@@ -9995,6 +10034,7 @@ class CmuxWindowView : public views::View,
   std::optional<base::SequenceBound<base::FilePathWatcher>>
       keymap_file_watcher_;
   base::OneShotTimer keymap_reload_timer_;
+  int applied_ui_font_size_ = -1;
   RailConfig base_rail_config_;
   std::optional<CmuxThemePalette> active_theme_palette_;
   // Theme name captured at the same moment as active_theme_palette_. The
@@ -10322,9 +10362,9 @@ class CmuxWidgetDestroyObserver : public views::WidgetObserver {
     }
     widget->RemoveObserver(this);
     ClearViewsWindowStateForWidget(widget);
-    if (NativeWindows().empty()) {
-      DestroyCmuxExtensionsContainer();
-    }
+    // The root view has not been destroyed yet. Its extension strips, action
+    // models, and menu buttons still reference their Browser's container.
+    // CmuxWindowView releases each container after destroying those children.
   }
 
   void OnWidgetActivationChanged(views::Widget* widget, bool active) override {

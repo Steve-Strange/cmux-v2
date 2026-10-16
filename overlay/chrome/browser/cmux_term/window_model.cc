@@ -354,6 +354,14 @@ WorkspaceId WindowModel::AddWorkspace(SurfaceKind first_tab_kind,
   return AddChildWorkspace(kInvalidId, first_tab_kind, title, registry_key);
 }
 
+WorkspaceId WindowModel::AddEmptyWorkspace(const std::string& title,
+                                           const std::string& registry_key) {
+  const WorkspaceId workspace = AddWorkspace(SurfaceKind::kWeb, title, registry_key);
+  Pane* pane = FindPane(workspace, PanesOf(workspace).front());
+  RemoveProjectedTab(workspace, pane->id, pane->selected);
+  return workspace;
+}
+
 WorkspaceId WindowModel::AddChildWorkspace(WorkspaceId parent,
                                            SurfaceKind first_tab_kind,
                                            const std::string& title,
@@ -1449,6 +1457,18 @@ void WindowModel::CloseTab(WorkspaceId workspace,
     int next = std::min(idx, static_cast<int>(p->tabs.size()) - 1);
     p->selected = p->tabs[next].id;
   }
+}
+
+void WindowModel::RemoveProjectedTab(WorkspaceId workspace, PaneId pane,
+                                     SurfaceTabId tab) {
+  Pane* p = FindPane(workspace, pane);
+  if (p && p->tabs.size() == 1 && p->tabs.front().id == tab &&
+      PanesOf(workspace).size() == 1) {
+    p->tabs.clear();
+    p->selected = kInvalidId;
+    return;
+  }
+  CloseTab(workspace, pane, tab);
 }
 
 void WindowModel::SelectTab(WorkspaceId workspace,

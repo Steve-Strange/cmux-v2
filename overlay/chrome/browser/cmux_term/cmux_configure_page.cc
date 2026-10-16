@@ -88,6 +88,14 @@ constexpr char kIndexHtml[] = R"HTML(<!doctype html>
         sidebar, tabs, toolbar, omnibox, menus, and New Tab page update
         together. Choose “Follow Ghostty config” to use your Ghostty files.</p>
       <div class="theme-picker">
+        <label for="ui-font-size">Interface font size (sidebar and tabs)</label>
+        <select id="ui-font-size" disabled><option value="0">System default</option></select>
+        <label for="terminal-font-size">Terminal font size</label>
+        <select id="terminal-font-size" disabled><option value="0">Ghostty default</option></select>
+      </div>
+      <p class="muted">Font sizes apply immediately and are remembered. Choose a
+        theme below to change text and background colors together.</p>
+      <div class="theme-picker">
         <label for="ghostty-theme">Theme</label>
         <input id="ghostty-theme" list="ghostty-theme-options"
           autocomplete="off" placeholder="Follow Ghostty config">
@@ -347,7 +355,7 @@ legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-pat
 .theme-picker { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px;
   align-items: end; margin-top: 18px; }
 .theme-picker label { grid-column: 1 / -1; font-size: 12px; font-weight: 650; }
-#ghostty-theme { min-width: 0; padding: 10px 12px; border: 1px solid var(--line);
+#ghostty-theme, .theme-picker select { min-width: 0; padding: 10px 12px; border: 1px solid var(--line);
   border-radius: 10px; color: var(--text); background: var(--bg); font: inherit; }
 .toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
   margin-top: 20px; }
@@ -502,6 +510,15 @@ function renderPalette(palette) {
   }
 }
 
+const uiFontSize = document.querySelector('#ui-font-size');
+const terminalFontSize = document.querySelector('#terminal-font-size');
+for (const [select, minimum, maximum] of [[uiFontSize, 10, 22], [terminalFontSize, 8, 32]]) {
+  for (let size = minimum; size <= maximum; ++size) {
+    select.add(new Option(String(size), String(size)));
+  }
+  select.addEventListener('change', saveCustomization);
+}
+
 function renderCustomization(state, includeThemes = false) {
   if (includeThemes) {
     themeOptions.replaceChildren();
@@ -514,6 +531,8 @@ function renderCustomization(state, includeThemes = false) {
   }
   renderPalette(state.palette);
   themePicker.value = state.theme || '';
+  uiFontSize.value = String(state.uiFontSize || 0);
+  terminalFontSize.value = String(state.terminalFontSize || 0);
   for (const toggle of toolbarToggles) {
     toggle.checked = Boolean(state.toolbar?.[toggle.dataset.toolbar]);
   }
@@ -538,6 +557,7 @@ async function saveCustomization() {
   if (!customizationLoaded) return;
   const generation = ++customizationSaveGeneration;
   themePicker.disabled = true;
+  uiFontSize.disabled = terminalFontSize.disabled = true;
   toolbarToggles.forEach(toggle => toggle.disabled = true);
   setCustomizationStatus('Applying…');
   setToolbarStatus('Applying…');
@@ -545,6 +565,8 @@ async function saveCustomization() {
     let state = await sendWithPromise('setCustomization', {
       theme: themePicker.value.trim(),
       toolbar: currentToolbarState(),
+      uiFontSize: Number(uiFontSize.value),
+      terminalFontSize: Number(terminalFontSize.value),
     });
     if (!state.ok) throw new Error(state.error || 'Could not save customization');
     if (generation !== customizationSaveGeneration) return;
@@ -563,6 +585,7 @@ async function saveCustomization() {
   } finally {
     if (generation === customizationSaveGeneration) {
       themePicker.disabled = false;
+      uiFontSize.disabled = terminalFontSize.disabled = false;
       toolbarToggles.forEach(toggle => toggle.disabled = false);
     }
   }
@@ -574,6 +597,7 @@ async function loadCustomization() {
   renderCustomization(state, true);
   customizationLoaded = true;
   themePicker.disabled = false;
+  uiFontSize.disabled = terminalFontSize.disabled = false;
   toolbarToggles.forEach(toggle => toggle.disabled = false);
   setCustomizationStatus(
     state.theme ? `Using ${state.theme}.` : 'Following your Ghostty configuration.');
@@ -641,6 +665,7 @@ document.querySelector('#show-all-toolbar').addEventListener('click', () => {
 });
 document.querySelector('#reset-customization').addEventListener('click', async () => {
   themePicker.disabled = true;
+  uiFontSize.disabled = terminalFontSize.disabled = true;
   toolbarToggles.forEach(toggle => toggle.disabled = true);
   setCustomizationStatus('Resetting…');
   setToolbarStatus('Resetting…');
@@ -658,6 +683,7 @@ document.querySelector('#reset-customization').addEventListener('click', async (
     setToolbarStatus(error.message || String(error), 'error');
   } finally {
     themePicker.disabled = false;
+    uiFontSize.disabled = terminalFontSize.disabled = false;
     toolbarToggles.forEach(toggle => toggle.disabled = false);
   }
 });
@@ -912,6 +938,8 @@ base::DictValue CustomizationToValue(
   base::DictValue value;
   value.Set("ok", true);
   value.Set("theme", config.ghostty_theme_name);
+  value.Set("uiFontSize", config.ui_font_size);
+  value.Set("terminalFontSize", config.terminal_font_size);
   if (themes) {
     base::ListValue theme_values;
     for (const std::string& theme : *themes) {
@@ -954,6 +982,8 @@ void ResetCustomization(LayoutConfig* config) {
     return;
   }
   const LayoutConfig defaults;
+  config->ui_font_size = defaults.ui_font_size;
+  config->terminal_font_size = defaults.terminal_font_size;
   config->ghostty_theme = defaults.ghostty_theme;
   config->ghostty_theme_name = defaults.ghostty_theme_name;
   config->toolbar_show_back = defaults.toolbar_show_back;
@@ -1108,12 +1138,16 @@ class CmuxConfigureHandler : public content::WebUIMessageHandler {
     AllowJavascript();
     LayoutConfig config =
         GetPublishedLayoutConfig().value_or(LayoutConfig());
-    const std::string previous_theme = config.ghostty_theme_name;
     const base::DictValue& input = args[1].GetDict();
+    const std::optional<int> ui_font = input.FindInt("uiFontSize");
+    const std::optional<int> terminal_font = input.FindInt("terminalFontSize");
     const std::string* theme = input.FindString("theme");
     const base::DictValue* toolbar = input.FindDict("toolbar");
     base::DictValue result;
-    if (!theme || !toolbar ||
+    if (!ui_font || !terminal_font ||
+        (*ui_font != 0 && (*ui_font < 10 || *ui_font > 22)) ||
+        (*terminal_font != 0 && (*terminal_font < 8 || *terminal_font > 32)) ||
+        !theme || !toolbar ||
         theme->find_first_of("\r\n") != std::string::npos ||
         (!theme->empty() && *theme != config.ghostty_theme_name &&
          !ghostty_themes_.contains(*theme)) ||
@@ -1135,10 +1169,12 @@ class CmuxConfigureHandler : public content::WebUIMessageHandler {
       result.Set("ok", false);
       result.Set("error", "The customization request was invalid.");
     } else {
+      config.ui_font_size = *ui_font;
+      config.terminal_font_size = *terminal_font;
       config.ghostty_theme = true;
       config.ghostty_theme_name = *theme;
       SaveLayoutConfig(config);
-      ReloadCustomizationConsumers(previous_theme != config.ghostty_theme_name);
+      ReloadCustomizationConsumers(true);
       result = CustomizationToValue(config);
     }
     ResolveJavascriptCallback(args[0].Clone(),
@@ -1152,10 +1188,9 @@ class CmuxConfigureHandler : public content::WebUIMessageHandler {
     AllowJavascript();
     LayoutConfig config =
         GetPublishedLayoutConfig().value_or(LayoutConfig());
-    const std::string previous_theme = config.ghostty_theme_name;
     ResetCustomization(&config);
     SaveLayoutConfig(config);
-    ReloadCustomizationConsumers(previous_theme != config.ghostty_theme_name);
+    ReloadCustomizationConsumers(true);
     ResolveJavascriptCallback(
         args[0].Clone(),
         base::Value(CustomizationToValue(config)));

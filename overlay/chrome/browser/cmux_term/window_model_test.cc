@@ -1773,7 +1773,26 @@ void TestWorkspaceLayoutMode() {
 
 }  // namespace
 
+void TestEmptyRegistryRestoration() {
+  WindowModel model;
+  const auto workspace = model.AddEmptyWorkspace("Restored", "registry-key");
+  const auto pane = model.PanesOf(workspace).front();
+  Check(model.FindPane(workspace, pane)->tabs.empty(), "restore has no default web tab");
+  const auto terminal = model.AddTab(workspace, pane, SurfaceKind::kTerminal);
+  model.RemoveProjectedTab(workspace, pane, terminal);
+  Check(model.PanesOf(workspace).size() == 1 &&
+            model.FindPane(workspace, pane)->tabs.empty(),
+        "terminal rebind keeps an empty pane without a web fallback");
+  const auto restored = model.AddTab(workspace, pane, SurfaceKind::kTerminal);
+  Check(model.FindPane(workspace, pane)->selected == restored,
+        "canonical terminal fills the restored pane");
+  model.CloseTab(workspace, pane, restored);
+  Check(model.FindPane(workspace, pane)->tabs.size() == 1,
+        "explicit close retains its existing final-pane invariant");
+}
+
 int main() {
+  TestEmptyRegistryRestoration();
   std::printf("window_model_test\n");
   TestWorkspaceLifecycle();
   TestDuplicateWorkspace();

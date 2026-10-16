@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/browser/cmux_term/cmux_pane_extension_pins.h"
 #include "chrome/browser/cmux_term/cmux_workspace_projection.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/bubble_anchor_util.h"
@@ -113,6 +114,11 @@ CmuxBrowserWindow::CmuxBrowserWindow(
 }
 
 CmuxBrowserWindow::~CmuxBrowserWindow() {
+  ClearPaneExtensionPinsForBrowser(browser_);
+  // Match BrowserWidget/WebUIBrowserWindow: features such as the live-tab
+  // context hold references to this window and must release them before it
+  // is freed, even though Browser destroys its features after window_.
+  browser_->GetFeatures().TearDownPreBrowserWindowDestruction();
   const auto existing = BrowserWindows().find(BrowserIdentity(browser_));
   CHECK(existing != BrowserWindows().end());
   CHECK_EQ(existing->second.get(), this);

@@ -4,6 +4,7 @@
 #include "chrome/browser/cmux_term/cmux_layout_config.h"
 
 #include <cstdlib>
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -243,6 +244,8 @@ LayoutConfig::~LayoutConfig() = default;
 
 std::string LayoutConfig::ToJson() const {
   base::DictValue d;
+  d.Set("ui_font_size", ui_font_size);
+  d.Set("terminal_font_size", terminal_font_size);
   d.Set("rail_width", rail_width);
   d.Set("sidebar_icon_width",
         sidebar_metrics::ClampIconsWidth(sidebar_icon_width));
@@ -356,6 +359,10 @@ bool LayoutConfig::FromJson(const std::string& json, LayoutConfig* out) {
     }
   };
 
+  geti("ui_font_size", next.ui_font_size);
+  geti("terminal_font_size", next.terminal_font_size);
+  if (next.ui_font_size != 0) next.ui_font_size = std::clamp(next.ui_font_size, 10, 22);
+  if (next.terminal_font_size != 0) next.terminal_font_size = std::clamp(next.terminal_font_size, 8, 32);
   geti("rail_width", next.rail_width);
   geti("sidebar_icon_width", next.sidebar_icon_width);
   next.sidebar_icon_width =

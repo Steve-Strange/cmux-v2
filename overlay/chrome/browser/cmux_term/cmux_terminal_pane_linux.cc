@@ -13,6 +13,8 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <set>
+#include <cmath>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -45,6 +47,12 @@
 #include "chrome/browser/cmux_term/cmux_tui_protocol.h"
 #include "chrome/browser/cmux_term/cmux_views.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
+#include "chrome/browser/ui/simple_message_box.h"
+#include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/scoped_clipboard_writer.h"
+#include "ui/base/ime/input_method.h"
+#include "ui/base/ime/text_input_client.h"
+#include "ui/base/ime/text_input_flags.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "third_party/skia/include/core/SkPath.h"
@@ -58,14 +66,17 @@
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/color/color_provider.h"
+#include "ui/compositor/compositor.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/skia_conversions.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 
 #if BUILDFLAG(IS_LINUX)
 #include "chrome/browser/cmux_term/cmux_theme_ghostty.h"
@@ -268,6 +279,14 @@ void TickSharedGhosttyApp() {
 // UI-sequence only; Ghostty background threads reach it by posting through
 // runtime.userdata's UI runner cell. cmux-tui, not this app, owns every shell.
 ghostty_app_t g_app = nullptr;
+std::string& CurrentThemeColors() {
+  static base::NoDestructor<std::string> colors;
+  return *colors;
+}
+base::RepeatingCallbackList<void()>& ThemeCallbacks() {
+  static base::NoDestructor<base::RepeatingCallbackList<void()>> callbacks;
+  return *callbacks;
+}
 
 void WakeupCb(void* userdata) {
   // Called from a Ghostty background thread. Hop to the UI thread to tick.
@@ -277,18 +296,10 @@ void WakeupCb(void* userdata) {
                                 base::BindOnce(&TickSharedGhosttyApp));
   }
 }
-bool ReadClipboardCb(void*, ghostty_clipboard_e, void*) {
-  return false;
-}
-void ConfirmReadClipboardCb(void*,
-                            const char*,
-                            void*,
-                            ghostty_clipboard_request_e) {}
-void WriteClipboardCb(void*,
-                      ghostty_clipboard_e,
-                      const ghostty_clipboard_content_s*,
-                      size_t,
-                      bool) {}
+bool ReadClipboardCb(void*, ghostty_clipboard_e, void*);
+void ConfirmReadClipboardCb(void*, const char*, void*, ghostty_clipboard_request_e);
+void WriteClipboardCb(void*, ghostty_clipboard_e,
+                      const ghostty_clipboard_content_s*, size_t, bool);
 bool ActionCb(ghostty_app_t, ghostty_target_s, ghostty_action_s);
 
 base::SequenceChecker& AppSequenceChecker() {
@@ -339,7 +350,8 @@ ghostty_app_t EnsureApp() {
 
   ghostty_runtime_config_s rt = {};
   rt.userdata = wakeup_runner;
-  rt.supports_selection_clipboard = false;
+  rt.supports_selection_clipboard = ui::Clipboard::IsSupportedClipboardBuffer(
+      ui::ClipboardBuffer::kSelection);
   rt.wakeup_cb = WakeupCb;
   rt.action_cb = ActionCb;
   rt.read_clipboard_cb = ReadClipboardCb;
@@ -382,7 +394,8 @@ ghostty_input_mouse_button_e MouseButton(const ui::MouseEvent& e) {
 
 class CmuxTerminalSurfaceLinux : public views::View,
                                  public CmuxSurface,
-                                 public CmuxTerminalBackend::Frontend {
+                                 public CmuxTerminalBackend::Frontend,
+                                 public ui::TextInputClient {
   METADATA_HEADER(CmuxTerminalSurfaceLinux, views::View)
 
  public:
@@ -411,6 +424,11 @@ class CmuxTerminalSurfaceLinux : public views::View,
     }
     backend_attached_ = true;
     backend_->AttachFrontend(this, cols, rows);
+    layout_subscription_ = AddLayoutConfigChangedCallback(base::BindRepeating(
+        &CmuxTerminalSurfaceLinux::ApplyFontSize, weak_factory_.GetWeakPtr()));
+    theme_subscription_ = ThemeCallbacks().Add(base::BindRepeating(
+        &CmuxTerminalSurfaceLinux::ApplyThemeColors, weak_factory_.GetWeakPtr()));
+    ApplyFontSize(GetPublishedLayoutConfig().value_or(LayoutConfig()));
   }
 
   CmuxTerminalSurfaceLinux(const CmuxTerminalSurfaceLinux&) = delete;
@@ -422,10 +440,15 @@ class CmuxTerminalSurfaceLinux : public views::View,
       backend_->DetachFrontend(this);
       backend_attached_ = false;
     }
+    if (GetInputMethod()) {
+      GetInputMethod()->DetachTextInputClient(this);
+    }
+    CancelClipboardRequests();
     mirror_retry_timer_.Stop();
     UnregisterFromTicker();
     StopFrameMailbox();
     if (surface_) {
+      CancelClipboardRequests();
       ghostty_surface_free(surface_);
       surface_ = nullptr;
     }
@@ -493,7 +516,7 @@ class CmuxTerminalSurfaceLinux : public views::View,
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     const std::vector<uint8_t> filtered =
         StripCmuxTuiReplayPalette(base::as_string_view(replay));
-    ReplaceMirror(filtered);
+    ReplayMirror(filtered);
     if (colors) {
       ApplyTerminalColors(*colors);
     }
@@ -566,6 +589,7 @@ class CmuxTerminalSurfaceLinux : public views::View,
   void AddedToWidget() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     UpdateTickerState();
+    OnBoundsChanged(bounds());
   }
 
   void RemovedFromWidget() override {
@@ -624,17 +648,28 @@ class CmuxTerminalSurfaceLinux : public views::View,
     if (b.width() <= 0 || b.height() <= 0) {
       return;
     }
-    ghostty_surface_set_content_scale(surface_, 1.0, 1.0);
-    opengl_host_->SetSize(static_cast<uint32_t>(b.width()),
-                          static_cast<uint32_t>(b.height()));
-    ghostty_surface_set_size(surface_, static_cast<uint32_t>(b.width()),
-                             static_cast<uint32_t>(b.height()));
+    const float scale = ContentScale();
+    const gfx::Size pixels = gfx::ScaleToCeiledSize(b.size(), scale);
+    ghostty_surface_set_content_scale(surface_, scale, scale);
+    opengl_host_->SetSize(static_cast<uint32_t>(pixels.width()),
+                          static_cast<uint32_t>(pixels.height()));
+    ghostty_surface_set_size(surface_, static_cast<uint32_t>(pixels.width()),
+                             static_cast<uint32_t>(pixels.height()));
     const ghostty_surface_size_s size = ghostty_surface_size(surface_);
+    VLOG(1) << "cmux-term-geometry: scale=" << scale
+            << " logical=" << b.size().ToString()
+            << " pixels=" << pixels.ToString()
+            << " cells=" << size.columns << "x" << size.rows;
     if (backend_attached_) {
       backend_->UpdateSize(std::max<uint16_t>(size.columns, 1),
                            std::max<uint16_t>(size.rows, 1));
     }
     DrawSurfaceForEvent();
+  }
+
+  void OnDeviceScaleFactorChanged(float old_scale, float new_scale) override {
+    views::View::OnDeviceScaleFactorChanged(old_scale, new_scale);
+    OnBoundsChanged(bounds());
   }
 
   bool OnMousePressed(const ui::MouseEvent& e) override {
@@ -698,10 +733,27 @@ class CmuxTerminalSurfaceLinux : public views::View,
   }
 
   void OnKeyEvent(ui::KeyEvent* e) override {
+    if (e->key_code() == ui::VKEY_INSERT) {
+      VLOG(1) << "cmux-term: insert event code=" << static_cast<int>(e->code())
+              << " character=" << static_cast<int>(e->GetCharacter())
+              << " shift=" << e->IsShiftDown();
+    }
+    // ProcessKey is the IME's composition notification, not terminal input.
+    // Printable/control characters are delivered once through InsertChar.
+    if (e->key_code() == ui::VKEY_PROCESSKEY ||
+        (e->type() == ui::EventType::kKeyPressed && e->GetCharacter())) {
+      return;
+    }
+    SendKey(*e);
+    e->StopPropagation();
+  }
+
+  void SendKey(const ui::KeyEvent& event) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     if (!surface_) {
       return;
     }
+    const ui::KeyEvent* e = &event;
     ghostty_input_key_s k = {};
     k.action =
         e->type() == ui::EventType::kKeyPressed
@@ -720,9 +772,11 @@ class CmuxTerminalSurfaceLinux : public views::View,
       if (ch >= 0x20 && ch != 0x7f) {
         text = base::UTF16ToUTF8(std::u16string(1, ch));
       }
-      // Unshifted codepoint (lowercase ASCII for letters) for binding matching.
-      unshifted = (ch >= u'A' && ch <= u'Z') ? static_cast<uint32_t>(ch) + 32u
-                                             : static_cast<uint32_t>(ch);
+      // GetCharacter() folds Ctrl+V to U+0016. Ghostty bindings need the
+      // printable key identity, otherwise Ctrl+Shift+C/V never match.
+      unshifted = e->GetDomKey().IsCharacter()
+                      ? e->GetDomKey().ToCharacter() : ch;
+      if (unshifted >= 'A' && unshifted <= 'Z') unshifted += 'a' - 'A';
     }
 #if BUILDFLAG(IS_WIN)
     // On Windows the DomCode->native keycode does not line up with ghostty's
@@ -760,11 +814,15 @@ class CmuxTerminalSurfaceLinux : public views::View,
     k.text = text.c_str();
     k.composing = false;
     ghostty_surface_key(surface_, k);
-    e->SetHandled();
   }
 
   void OnFocus() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    views::View::OnFocus();
+    if (GetInputMethod()) {
+      GetInputMethod()->SetFocusedTextInputClient(this);
+      NotifyCaretBoundsChanged();
+    }
     if (surface_) {
       ghostty_surface_set_focus(surface_, true);
       DrawSurfaceForEvent();
@@ -775,16 +833,247 @@ class CmuxTerminalSurfaceLinux : public views::View,
   }
   void OnBlur() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    if (GetInputMethod()) {
+      GetInputMethod()->CancelComposition(this);
+      GetInputMethod()->DetachTextInputClient(this);
+    }
+    ClearCompositionText();
+    views::View::OnBlur();
     if (surface_) {
       ghostty_surface_set_focus(surface_, false);
       DrawSurfaceForEvent();
     }
   }
 
+  // A terminal has no editable surrounding document: the PTY owns editing.
+  // Only preedit and committed text belong to this input-method client.
+  base::WeakPtr<ui::TextInputClient> AsWeakPtr() override {
+    return weak_factory_.GetWeakPtr();
+  }
+  void SetCompositionText(const ui::CompositionText& composition) override {
+    composition_ = composition.text;
+    if (surface_) {
+      const std::string text = base::UTF16ToUTF8(composition_);
+      ghostty_surface_preedit(surface_, text.data(), text.size());
+      DrawSurfaceForEvent();
+    }
+    NotifyCaretBoundsChanged();
+  }
+  size_t ConfirmCompositionText(bool) override {
+    const std::u16string text = composition_;
+    InsertText(text, InsertTextCursorBehavior::kMoveCursorAfterText);
+    return text.size();
+  }
+  void ClearCompositionText() override {
+    composition_.clear();
+    if (surface_) {
+      ghostty_surface_preedit(surface_, nullptr, 0);
+      DrawSurfaceForEvent();
+    }
+  }
+  void InsertText(const std::u16string& text, InsertTextCursorBehavior) override {
+    ClearCompositionText();
+    if (surface_ && !text.empty()) {
+      const std::string utf8 = base::UTF16ToUTF8(text);
+      // Committed IME text is typing, not bracketed clipboard paste.
+      ghostty_surface_text_input(surface_, utf8.data(), utf8.size());
+    }
+  }
+  void InsertChar(const ui::KeyEvent& event) override { SendKey(event); }
+  ui::TextInputType GetTextInputType() const override {
+    return ui::TEXT_INPUT_TYPE_TEXT;
+  }
+  ui::TextInputMode GetTextInputMode() const override {
+    return ui::TEXT_INPUT_MODE_DEFAULT;
+  }
+  base::i18n::TextDirection GetTextDirection() const override {
+    return base::i18n::LEFT_TO_RIGHT;
+  }
+  int GetTextInputFlags() const override { return ui::TEXT_INPUT_FLAG_NONE; }
+  bool CanComposeInline() const override { return true; }
+  gfx::Rect GetCaretBounds() const override {
+    double x = 0, y = 0, width = 1, height = 18;
+    if (surface_) {
+      // Ghostty returns logical coordinates (already divided by content scale).
+      ghostty_surface_ime_point(surface_, &x, &y, &width, &height);
+    }
+    gfx::Rect caret(static_cast<int>(std::floor(x)),
+                    static_cast<int>(std::floor(y - height)),
+                    std::max(1, static_cast<int>(std::ceil(width))),
+                    std::max(1, static_cast<int>(std::ceil(height))));
+    caret.Offset(GetContentsBounds().OffsetFromOrigin());
+    views::View::ConvertRectToScreen(this, &caret);
+    return caret;
+  }
+  gfx::Rect GetSelectionBoundingBox() const override { return {}; }
+  bool GetCompositionCharacterBounds(size_t index, gfx::Rect* rect) const override {
+    if (index >= composition_.size()) return false;
+    *rect = GetCaretBounds();
+    return true;
+  }
+  bool HasCompositionText() const override { return !composition_.empty(); }
+  FocusReason GetFocusReason() const override {
+    return HasFocus() ? FOCUS_REASON_OTHER : FOCUS_REASON_NONE;
+  }
+  bool GetTextRange(gfx::Range*) const override { return false; }
+  bool GetCompositionTextRange(gfx::Range*) const override { return false; }
+  bool GetEditableSelectionRange(gfx::Range*) const override { return false; }
+  bool SetEditableSelectionRange(const gfx::Range&) override { return false; }
+  bool GetTextFromRange(const gfx::Range&, std::u16string*) const override {
+    return false;
+  }
+  void OnInputMethodChanged() override { NotifyCaretBoundsChanged(); }
+  bool ChangeTextDirectionAndLayoutAlignment(base::i18n::TextDirection) override {
+    return false;
+  }
+  void ExtendSelectionAndDelete(size_t, size_t) override {}
+  void EnsureCaretNotInRect(const gfx::Rect&) override {}
+  bool IsTextEditCommandEnabled(ui::TextEditCommand) const override { return false; }
+  void SetTextEditCommandForNextKeyEvent(ui::TextEditCommand) override {}
+  ukm::SourceId GetClientSourceForMetrics() const override {
+    return ukm::kInvalidSourceId;
+  }
+  bool ShouldDoLearning() override { return false; }
+  bool SetCompositionFromExistingText(
+      const gfx::Range&, const std::vector<ui::ImeTextSpan>&) override {
+    return false;
+  }
+  void GetActiveTextInputControlLayoutBounds(
+      std::optional<gfx::Rect>* control, std::optional<gfx::Rect>* selection) override {
+    *control = GetBoundsInScreen();
+    *selection = GetCaretBounds();
+  }
+#if BUILDFLAG(IS_WIN)
+  std::optional<gfx::Rect> GetProximateCharacterBounds(const gfx::Range&) const override {
+    return std::nullopt;
+  }
+  std::optional<size_t> GetProximateCharacterIndexFromPoint(
+      const gfx::Point&, ui::IndexFromPointFlags) const override {
+    return std::nullopt;
+  }
+  void SetActiveCompositionForAccessibility(
+      const gfx::Range&, const std::u16string&, bool) override {}
+#endif
+
+  bool ReadClipboard(ghostty_clipboard_e clipboard, void* request) {
+    if (!surface_) return false;
+    const auto buffer = clipboard == GHOSTTY_CLIPBOARD_STANDARD
+                            ? ui::ClipboardBuffer::kCopyPaste
+                            : ui::ClipboardBuffer::kSelection;
+    if (!ui::Clipboard::IsSupportedClipboardBuffer(buffer)) return false;
+    VLOG(1) << "cmux-term: clipboard read buffer=" << static_cast<int>(buffer);
+    clipboard_requests_.insert(request);
+    ui::Clipboard::GetForCurrentThread()->ReadText(
+        buffer, std::nullopt,
+        base::BindOnce([](base::WeakPtr<CmuxTerminalSurfaceLinux> pane,
+                          void* request, std::u16string text) {
+          if (pane) pane->CompleteClipboard(request, base::UTF16ToUTF8(text), false);
+        }, weak_factory_.GetWeakPtr(), request));
+    return true;
+  }
+  void ConfirmClipboard(const char* text, void* request,
+                        ghostty_clipboard_request_e kind) {
+    clipboard_requests_.insert(request);
+    chrome::ShowQuestionMessageBoxAsync(
+        GetWidget() ? GetWidget()->GetNativeWindow() : gfx::NativeWindow(),
+        u"Terminal clipboard",
+        kind == GHOSTTY_CLIPBOARD_REQUEST_PASTE
+            ? u"This paste contains control characters or multiple lines that may execute commands. Paste anyway?"
+            : u"Allow the terminal application to access the system clipboard?",
+        base::BindOnce([](base::WeakPtr<CmuxTerminalSurfaceLinux> pane,
+                          void* request, std::string text, chrome::MessageBoxResult result) {
+          if (pane) pane->CompleteClipboard(request,
+              result == chrome::MESSAGE_BOX_RESULT_YES ? text : std::string(), true);
+        }, weak_factory_.GetWeakPtr(), request, std::string(text ? text : "")));
+  }
+  void WriteClipboard(ghostty_clipboard_e clipboard, std::string text, bool confirm) {
+    const auto buffer = clipboard == GHOSTTY_CLIPBOARD_STANDARD
+                            ? ui::ClipboardBuffer::kCopyPaste
+                            : ui::ClipboardBuffer::kSelection;
+    if (!ui::Clipboard::IsSupportedClipboardBuffer(buffer)) return;
+    if (confirm) {
+      chrome::ShowQuestionMessageBoxAsync(
+          GetWidget() ? GetWidget()->GetNativeWindow() : gfx::NativeWindow(),
+          u"Terminal clipboard", u"Allow the terminal application to replace the clipboard?",
+          base::BindOnce([](base::WeakPtr<CmuxTerminalSurfaceLinux> pane,
+                            ghostty_clipboard_e clipboard, std::string text,
+                            chrome::MessageBoxResult result) {
+            if (pane && result == chrome::MESSAGE_BOX_RESULT_YES)
+              pane->WriteClipboard(clipboard, std::move(text), false);
+          }, weak_factory_.GetWeakPtr(), clipboard, std::move(text)));
+      return;
+    }
+    ui::ScopedClipboardWriter writer(buffer);
+    writer.WriteText(base::UTF8ToUTF16(text));
+  }
+
  private:
   static constexpr uint32_t kInitW = 800;
   static constexpr uint32_t kInitH = 600;
   static constexpr size_t kMaxPendingMirrorOutputBytes = 16 * 1024 * 1024;
+
+  void ApplyFontSize(const LayoutConfig& config) {
+    if (!surface_ || applied_font_size_ == config.terminal_font_size) return;
+    applied_font_size_ = config.terminal_font_size;
+    const std::string action = config.terminal_font_size == 0
+        ? "reset_font_size" : "set_font_size:" + std::to_string(config.terminal_font_size);
+    ghostty_surface_binding_action(surface_, action.data(), action.size());
+    OnBoundsChanged(bounds());
+  }
+  void ApplyThemeColors() {
+    if (!surface_ || CurrentThemeColors().empty()) return;
+    ghostty_config_t config = ghostty_config_new();
+    if (!config) return;
+    ghostty_config_load_string(config, CurrentThemeColors().data(),
+                              CurrentThemeColors().size(), "cmux://settings/appearance");
+    ghostty_config_finalize(config);
+    ghostty_surface_update_theme_config(surface_, config);
+    ghostty_config_free(config);
+    DrawSurfaceForEvent();
+  }
+
+  void NotifyCaretBoundsChanged() {
+    if (HasFocus() && GetInputMethod()) {
+      GetInputMethod()->OnCaretBoundsChanged(this);
+    }
+  }
+  void CompleteClipboard(void* request, const std::string& text, bool confirmed) {
+    if (surface_ && clipboard_requests_.erase(request)) {
+      ghostty_surface_complete_clipboard_request(surface_, text.c_str(), request, confirmed);
+    }
+  }
+  void CancelClipboardRequests() {
+    const auto requests = clipboard_requests_;
+    for (void* request : requests) CompleteClipboard(request, std::string(), true);
+  }
+
+  float ContentScale() const {
+    const views::Widget* widget = GetWidget();
+    return widget && widget->GetCompositor()
+               ? widget->GetCompositor()->device_scale_factor()
+               : 1.0f;
+  }
+
+  void ReplayMirror(base::span<const uint8_t> replay) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    if (!surface_) {
+      ReplaceMirror(replay);
+      return;
+    }
+    // A snapshot replaces terminal state, not the renderer's lifetime. Reset
+    // the existing VT state before replaying it so resize/recovery does not
+    // destroy a live Ghostty surface or leave stale screen/scrollback data.
+    pending_replay_.clear();
+    pending_output_.clear();
+    awaiting_replay_ = false;
+    static constexpr char kReset[] = "\x1b" "c" "\x1b[3J";
+    ghostty_surface_process_output(surface_, kReset, sizeof(kReset) - 1);
+    if (!replay.empty()) {
+      ghostty_surface_process_output(
+          surface_, reinterpret_cast<const char*>(replay.data()), replay.size());
+    }
+    DrawSurfaceForEvent();
+  }
 
   void ReplaceMirror(base::span<const uint8_t> replay) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -800,6 +1089,7 @@ class CmuxTerminalSurfaceLinux : public views::View,
     UnregisterFromTicker();
     StopFrameMailbox();
     if (surface_) {
+      CancelClipboardRequests();
       ghostty_surface_free(surface_);
       surface_ = nullptr;
     }
@@ -812,10 +1102,12 @@ class CmuxTerminalSurfaceLinux : public views::View,
       return;
     }
     const gfx::Rect bounds = GetContentsBounds();
-    const uint32_t width =
-        bounds.width() > 0 ? static_cast<uint32_t>(bounds.width()) : kInitW;
-    const uint32_t height =
-        bounds.height() > 0 ? static_cast<uint32_t>(bounds.height()) : kInitH;
+    const float scale = ContentScale();
+    const gfx::Size pixels = gfx::ScaleToCeiledSize(
+        gfx::Size(bounds.width() > 0 ? bounds.width() : kInitW,
+                  bounds.height() > 0 ? bounds.height() : kInitH), scale);
+    const uint32_t width = static_cast<uint32_t>(pixels.width());
+    const uint32_t height = static_cast<uint32_t>(pixels.height());
     frame_mailbox_ = base::MakeRefCounted<OpenGLFrameMailbox>(
         ui_runner_, base::BindRepeating(&CmuxTerminalSurfaceLinux::OnFrame,
                                         weak_factory_.GetWeakPtr()));
@@ -836,7 +1128,7 @@ class CmuxTerminalSurfaceLinux : public views::View,
     ghostty_surface_config_s cfg = ghostty_surface_config_new();
     cfg.userdata = this;
     opengl_host_->PopulateSurfaceConfig(&cfg);
-    cfg.scale_factor = 1.0;
+    cfg.scale_factor = scale;
     cfg.font_size = 0;
     cfg.context = GHOSTTY_SURFACE_CONTEXT_WINDOW;
     cfg.io_mode = GHOSTTY_SURFACE_IO_MANUAL_MIRROR;
@@ -855,9 +1147,12 @@ class CmuxTerminalSurfaceLinux : public views::View,
       }
       return;
     }
-    ghostty_surface_set_content_scale(surface_, 1.0, 1.0);
+    ghostty_surface_set_content_scale(surface_, scale, scale);
     ghostty_surface_set_size(surface_, width, height);
     ghostty_surface_set_focus(surface_, HasFocus());
+    applied_font_size_ = -1;
+    ApplyFontSize(GetPublishedLayoutConfig().value_or(LayoutConfig()));
+    ApplyThemeColors();
     if (!pending_replay_.empty()) {
       ghostty_surface_process_output(
           surface_, reinterpret_cast<const char*>(pending_replay_.data()),
@@ -954,6 +1249,7 @@ class CmuxTerminalSurfaceLinux : public views::View,
     }
     if (frame_.width() != static_cast<int>(frame.width) ||
         frame_.height() != static_cast<int>(frame.height)) {
+      VLOG(1) << "cmux-term-frame: pixels=" << frame.width << "x" << frame.height;
       // N32 (BGRA on little-endian) is required by gfx::ImageSkia.
       frame_.allocPixels(SkImageInfo::Make(
           frame.width, frame.height, kN32_SkColorType, kPremul_SkAlphaType));
@@ -978,6 +1274,7 @@ class CmuxTerminalSurfaceLinux : public views::View,
         return;
       }
     }
+    NotifyCaretBoundsChanged();
     SchedulePaint();
   }
 
@@ -1023,6 +1320,11 @@ class CmuxTerminalSurfaceLinux : public views::View,
   friend class SharedGhosttyTicker;
   friend bool ActionCb(ghostty_app_t, ghostty_target_s, ghostty_action_s);
 
+  int applied_font_size_ = -1;
+  base::CallbackListSubscription layout_subscription_;
+  base::CallbackListSubscription theme_subscription_;
+  std::u16string composition_;
+  std::set<void*> clipboard_requests_;
   ghostty_surface_t surface_ = nullptr;
   std::unique_ptr<CmuxGhosttyOpenGLHost> opengl_host_;
   scoped_refptr<OpenGLFrameMailbox> frame_mailbox_;
@@ -1067,6 +1369,29 @@ class CmuxTerminalSurfaceLinux : public views::View,
   friend void CloseSurfaceCb(void* userdata, bool process_alive);
   friend void IoWriteCb(void* userdata, const char* bytes, uintptr_t len);
 };
+
+bool ReadClipboardCb(void* userdata, ghostty_clipboard_e clipboard, void* request) {
+  auto* pane = static_cast<CmuxTerminalSurfaceLinux*>(userdata);
+  return pane && pane->ReadClipboard(clipboard, request);
+}
+void ConfirmReadClipboardCb(void* userdata, const char* text, void* request,
+                            ghostty_clipboard_request_e kind) {
+  if (auto* pane = static_cast<CmuxTerminalSurfaceLinux*>(userdata))
+    pane->ConfirmClipboard(text, request, kind);
+}
+void WriteClipboardCb(void* userdata, ghostty_clipboard_e clipboard,
+                      const ghostty_clipboard_content_s* contents, size_t count,
+                      bool confirm) {
+  auto* pane = static_cast<CmuxTerminalSurfaceLinux*>(userdata);
+  if (!pane || !contents) return;
+  const auto items = UNSAFE_BUFFERS(base::span(contents, count));
+  for (const auto& item : items) {
+    if (item.mime && item.data && std::string_view(item.mime).starts_with("text/plain")) {
+      pane->WriteClipboard(clipboard, item.data, confirm);
+      return;
+    }
+  }
+}
 
 bool ActionCb(ghostty_app_t, ghostty_target_s target, ghostty_action_s action) {
   if (action.tag == GHOSTTY_ACTION_RENDER &&
@@ -1171,6 +1496,13 @@ void IoWriteCb(void* userdata, const char* bytes, uintptr_t len) {
 }
 
 }  // namespace
+
+#if BUILDFLAG(IS_LINUX)
+void ApplyCmuxLinuxTerminalTheme(const CmuxTheme& theme) {
+  CurrentThemeColors() = SerializeGhosttyThemeColors(theme);
+  ThemeCallbacks().Notify();
+}
+#endif
 
 // Linux/Windows definition of the seam declared in cmux_views.h (mac's lives
 // in cmux_views_mac.mm). Creates the OpenGL terminal frontend, parents it, and

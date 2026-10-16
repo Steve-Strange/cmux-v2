@@ -15,6 +15,9 @@ class Browser;
 
 namespace cmux {
 
+// Pins survive presentation rebuilds, but must not retain a deleted Browser.
+void ClearPaneExtensionPinsForBrowser(Browser* browser);
+
 // Seeds a pane's pin list once from Chrome's profile-level toolbar model.
 // Subsequent mutations are pane-local: tabs in the same pane share the list,
 // while sibling panes in the workspace remain independent.

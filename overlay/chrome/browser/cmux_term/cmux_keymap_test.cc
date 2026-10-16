@@ -242,6 +242,30 @@ void TestResolve() {
   Check(!command, "zoom defaults are gated away for terminal focus");
 }
 
+void TestLinuxTerminalControlKeys() {
+  Keymap keymap = DefaultKeymap(false);
+  KeyContext context;
+  context.is_linux = true;
+  context.terminal_focused = true;
+  for (const char* chord : {"ctrl+b", "ctrl+d", "ctrl+l", "ctrl+n",
+                            "ctrl+r", "ctrl+t", "ctrl+w", "ctrl+[", "ctrl+]"}) {
+    Check(!keymap.Resolve(MustParseChord(chord), context, false),
+          "Linux terminal Control chord reaches PTY");
+  }
+  auto split = keymap.Resolve(MustParseChord("ctrl+alt+d"), context, false);
+  Check(split && *split == "pane.splitRight", "explicit terminal split shortcut");
+  context.terminal_focused = false;
+  auto browser_split = keymap.Resolve(MustParseChord("ctrl+d"), context, false);
+  Check(browser_split && *browser_split == "pane.splitRight",
+        "browser Control shortcuts remain available");
+  context.terminal_focused = true;
+  KeymapLoadResult overrides = ParseKeymapJson(
+      R"({"keybindings":[{"key":"ctrl+d","command":"pane.splitRight"}]})");
+  keymap = KeymapFromConfig(false, overrides);
+  split = keymap.Resolve(MustParseChord("ctrl+d"), context, false);
+  Check(split && *split == "pane.splitRight", "explicit user binding wins");
+}
+
 void TestModifierSchemes() {
   using Scheme = ShortcutModifierScheme;
 
@@ -524,6 +548,7 @@ int main() {
   TestWhenParser();
   TestResolve();
   TestModifierSchemes();
+  TestLinuxTerminalControlKeys();
   TestVsCodeResolution();
   TestJson();
   std::printf("%d checks, %d failures\n", g_checks, g_failures);

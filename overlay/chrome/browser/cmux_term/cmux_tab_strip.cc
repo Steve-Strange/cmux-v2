@@ -558,6 +558,9 @@ class CmuxTab : public views::View, public gfx::AnimationDelegate {
     const TabStripThemeColors& colors =
         owner_ ? owner_->theme_colors() : fallback;
     if (label_) {
+      const gfx::FontList font;
+      label_->SetFontList(font.DeriveWithSizeDelta(
+          colors.font_size > 0 ? colors.font_size - font.GetFontSize() : 0));
       label_->SetEnabledColor(active_ ? colors.tab_active_text
                                       : colors.tab_idle_text);
     }

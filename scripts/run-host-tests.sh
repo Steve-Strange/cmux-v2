@@ -209,6 +209,12 @@ shopt -u nullglob
 
 for path in "${discovered[@]}"; do
   test="$(basename "$path")"
+  if [ "$test" = "cmux_ghostty_opengl_host_test.cc" ]; then
+    # This regression uses the real Chromium adapter and PartitionAlloc. It
+    # belongs to the GN test target, not the standalone pure-model compiler.
+    echo "Chromium integration test: run ninja -C out/Release cmux_ghostty_opengl_host_test separately"
+    continue
+  fi
   if ! is_known_test "$test"; then
     echo "ERROR: host test is not covered by scripts/run-host-tests.sh: $path" >&2
     exit 1

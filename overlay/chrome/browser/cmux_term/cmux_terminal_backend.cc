@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/rand_util.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 
 namespace cmux {
 
@@ -21,7 +22,9 @@ namespace {
 constexpr base::TimeDelta kReattachDelay = base::Milliseconds(200);
 constexpr base::TimeDelta kResizeDebounce = base::Milliseconds(100);
 constexpr base::TimeDelta kRendererCapabilityTtl = base::Seconds(5);
+#if BUILDFLAG(IS_MAC)
 constexpr base::TimeDelta kDirectAttachTimeout = base::Seconds(5);
+#endif
 constexpr base::TimeDelta kDirectCancelTimeout = base::Seconds(2);
 constexpr base::TimeDelta kDirectExitFallbackTimeout = base::Seconds(2);
 
@@ -699,6 +702,10 @@ CmuxTerminalBackend::CurrentRenderableSurface() const {
 
 void CmuxTerminalBackend::EnsureDirectAttached() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // Only the macOS frontend implements the direct terminal renderer. A failed
+  // cutover resets the compatibility attachment and requests another replay,
+  // so attempting it on Linux continually rebuilds the visible terminal.
+#if BUILDFLAG(IS_MAC)
   const std::optional<CmuxTuiSurfaceId> surface = CurrentSurface();
   if (closed_ || !frontend_ || frontend_suspended_ || !surface ||
       !client_->ready() ||
@@ -716,6 +723,7 @@ void CmuxTerminalBackend::EnsureDirectAttached() {
   frontend_->BeginCmuxTerminalHostInputCutover(
       attempt, base::BindOnce(&CmuxTerminalBackend::OnDirectInputCutoverReady,
                               base::RetainedRef(this), attempt));
+#endif
 }
 
 void CmuxTerminalBackend::OnDirectInputCutoverReady(uint64_t attempt,

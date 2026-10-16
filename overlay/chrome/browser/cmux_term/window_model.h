@@ -248,6 +248,10 @@ class WindowModel {
   WorkspaceId AddWorkspace(SurfaceKind first_tab_kind = SurfaceKind::kWeb,
                            const std::string& title = {},
                            const std::string& registry_key = {});
+  // Registry restoration has no default web tab. Keep one empty pane until
+  // canonical terminals (or an explicit user-created tab) arrive.
+  WorkspaceId AddEmptyWorkspace(const std::string& title,
+                                const std::string& registry_key);
   // Compatibility helper for callers that add a workspace "under" another:
   // the parent and new workspace are placed in the same shallow group. If the
   // parent is already grouped, the new workspace is appended to that group.
@@ -403,6 +407,10 @@ class WindowModel {
   // on that pane. If that pane is the workspace's only pane, no-op so every
   // pane remains non-empty.
   void CloseTab(WorkspaceId workspace, PaneId pane, SurfaceTabId tab);
+  // Projection removal must not invent a persistent tab when the final
+  // terminal is being rebound. Unlike explicit CloseTab, allow the last pane
+  // to remain empty; the workspace identity and its placement survive.
+  void RemoveProjectedTab(WorkspaceId workspace, PaneId pane, SurfaceTabId tab);
   void SelectTab(WorkspaceId workspace, PaneId pane, SurfaceTabId tab);
   bool SetTabLoading(WorkspaceId workspace,
                      PaneId pane,

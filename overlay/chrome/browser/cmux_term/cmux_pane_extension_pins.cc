@@ -52,6 +52,12 @@ PanePinState& StateFor(Browser* browser, PaneId pane) {
 
 }  // namespace
 
+void ClearPaneExtensionPinsForBrowser(Browser* browser) {
+  std::erase_if(PanePinStates(), [browser](const auto& entry) {
+    return entry.first.browser == browser;
+  });
+}
+
 void InitializePaneExtensionPins(
     Browser* browser,
     PaneId pane,

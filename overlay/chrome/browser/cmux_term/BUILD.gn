@@ -54,6 +54,22 @@ source_set("cmux_ghostty") {
 # detects unresolved placeholder colors and uses the rail's neutral/config
 # fallbacks. Do not pull //chrome/browser/ui/color:mixers into this target; it
 # carries browser themes, UI features, task-manager, and platform dependencies.
+if (is_linux) {
+  executable("cmux_ghostty_opengl_host_test") {
+    testonly = true
+    sources = [
+      "cmux_ghostty_opengl_host.cc",
+      "cmux_ghostty_opengl_host_test.cc",
+    ]
+    deps = [ "//base" ]
+    libs = [
+      "EGL",
+      "GL",
+      "dl",
+    ]
+  }
+}
+
 source_set("cmux_chrome_ui") {
   sources = [
     "cmux_easing.cc",

@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/memory/scoped_refptr.h"
+#include "build/build_config.h"
 #include "chrome/browser/cmux_term/cmux_keymap.h"
 #include "chrome/browser/cmux_term/cmux_theme.h"
 
@@ -36,6 +37,11 @@ class MouseEvent;
 }
 
 namespace cmux {
+#if BUILDFLAG(IS_LINUX)
+struct CmuxTheme;
+void ApplyCmuxLinuxTerminalTheme(const CmuxTheme& theme);
+#endif
+
 
 class CmuxStripController;
 class CmuxSurface;

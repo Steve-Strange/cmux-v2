@@ -31,6 +31,9 @@ enum class SidebarPosition {
 // Persisted geometry for the cmux window chrome and strip. animation_ms is the
 // global animation scale: 160ms == 1.0x bonsplit pane timing.
 struct LayoutConfig {
+  // Zero follows the platform/Ghostty default. UI size covers sidebar and tabs.
+  int ui_font_size = 0;
+  int terminal_font_size = 0;
   int rail_width = 200;
   int sidebar_icon_width = sidebar_metrics::kIconsWidth;
   int gap = 10;

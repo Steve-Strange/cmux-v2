@@ -60,6 +60,7 @@ inline constexpr SkColor kDefaultTabAccent = SkColorSetRGB(0x8a, 0x8f, 0x98);
 inline constexpr SkColor kDefaultTabStripBg = SkColorSetRGB(0x17, 0x19, 0x1f);
 
 struct TabStripThemeColors {
+  int font_size = 0;
   SkColor strip_background = kDefaultTabStripBg;
   SkColor tab_active_bg = kDefaultTabActiveBg;
   SkColor tab_hover_bg = kDefaultTabHoverBg;
