@@ -4,6 +4,8 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
+# shellcheck source=scripts/lib/mobile-attach.sh
+source "$PROJECT_DIR/scripts/lib/mobile-attach.sh"
 
 BUILD_TAG=steve-ssh
 OUTPUT_DIR="$PROJECT_DIR/build/personal-macos"
@@ -83,7 +85,7 @@ export CMUX_SKIP_ZIG_BUILD=1
 
 APP_PATH="$(awk '/^App path:/{getline; sub(/^  /, ""); print; exit}' "$BUILD_LOG")"
 [[ -n "$APP_PATH" && -d "$APP_PATH/Contents" ]] || { echo 'Build produced no app.' >&2; exit 1; }
-EXPECTED_BUNDLE_ID="com.cmuxterm.app.debug.$BUILD_TAG"
+EXPECTED_BUNDLE_ID="$(cmux_attach_mac_bundle_id "$BUILD_TAG")"
 ACTUAL_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Contents/Info.plist")"
 [[ "$ACTUAL_BUNDLE_ID" == "$EXPECTED_BUNDLE_ID" ]] || { echo 'Unexpected bundle identity.' >&2; exit 1; }
 

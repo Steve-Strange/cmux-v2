@@ -18,7 +18,7 @@ count. Test logs and a separate result artifact preserve the actual run evidence
 the build receipt records completion only after all selected suites pass.
 
 The app uses tag `steve-ssh`, the isolated identifier
-`com.cmuxterm.app.debug.steve-ssh`, and the local backend configuration. Extract
+`com.cmuxterm.app.debug.steve.ssh`, and the local backend configuration. Extract
 the zip and open the tagged app alongside the installed cmux. The app is signed
 ad hoc and is not notarized; if macOS asks for permission to open it, use Finder's
 Open action or Privacy & Security's Open Anyway for this build. Cloud login and
