@@ -10,6 +10,99 @@ import Testing
 #endif
 
 @Suite struct SessionPersistenceResumeBindingTests {
+    @Test func processDetectedTmuxStartupRunsSavedAttachWithoutALiveBinding() throws {
+        let runner = CMUXCLIErrorOutputRegressionTests()
+        let cli = try runner.bundledCLIPath()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-tmux-startup-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tmux = root.appendingPathComponent("tmux")
+        let marker = root.appendingPathComponent("attached")
+        try """
+        #!/bin/sh
+        printf '%s\\n' "$PWD" "$@" > "$CMUX_TEST_ATTACH_MARKER"
+        """.write(to: tmux, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tmux.path)
+        let arguments = [tmux.path, "-S", root.appendingPathComponent("server.sock").path, "attach", "-t", "$0"]
+        let binding = SurfaceResumeBindingSnapshot(
+            kind: "tmux",
+            command: arguments.map(TerminalStartupShellQuoting.singleQuoted).joined(separator: " "),
+            cwd: root.path,
+            checkpointId: "cmux",
+            source: "process-detected",
+            environment: ["CMUX_TEST_ATTACH_MARKER": marker.path],
+            autoResume: true
+        )
+        let input = try #require(Workspace.surfaceResumeStartupInput(
+            binding,
+            autoResumeAgentSessions: true,
+            promptForApproval: false,
+            approvalStoreURL: root.appendingPathComponent("approvals.json"),
+            approvalSigningSecret: Data("isolated-tmux-startup-secret".utf8)
+        ))
+        // A completed process scan can remove the transient tmux binding before
+        // the restored login shell runs its queued input. The saved attach must
+        // still execute; the CLI's agent-record route has nothing to restore.
+        let surfaceID = UUID().uuidString
+        let payload = try JSONSerialization.data(withJSONObject: ["ok": true, "result": [
+            "caller": ["surface_id": surfaceID], "restore_record": NSNull()
+        ]])
+        let socket = "/tmp/cmux-tmux-start-\(UUID().uuidString.prefix(8)).sock"
+        let responder = try UnixSocketResponder(path: socket, response: String(decoding: payload, as: UTF8.self))
+        defer { responder.stop() }
+        let result = runner.runProcess(
+            executablePath: "/bin/sh",
+            arguments: ["-c", input],
+            environment: [
+                "PATH": URL(fileURLWithPath: cli).deletingLastPathComponent().path + ":/usr/bin:/bin",
+                "HOME": root.path, "CFFIXED_USER_HOME": root.path, "SHELL": "/bin/sh",
+                "CMUX_SOCKET_PATH": socket, "CMUX_CLI_SENTRY_DISABLED": "1"
+            ],
+            currentDirectoryURL: root,
+            timeout: 10
+        )
+        try #require(!result.timedOut && result.status == 0, Comment(rawValue: result.diagnostics))
+        let recorded = try String(contentsOf: marker, encoding: .utf8).split(separator: "\n").map(String.init)
+        #expect(URL(fileURLWithPath: recorded[0]).resolvingSymlinksInPath() == root.resolvingSymlinksInPath())
+        #expect(Array(recorded.dropFirst()) == Array(arguments.dropFirst()))
+    }
+
+    @Test func tmuxInlineStartupDoesNotBypassResumeApproval() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-tmux-approval-\(UUID().uuidString)")
+        for source in ["cli", "session-import"] {
+            let binding = SurfaceResumeBindingSnapshot(
+                kind: "tmux", command: "tmux attach -t cmux", checkpointId: "cmux",
+                source: source, autoResume: true, approvalPolicy: .auto
+            )
+            #expect(Workspace.surfaceResumeStartupInput(
+                binding, autoResumeAgentSessions: true, promptForApproval: false,
+                approvalStoreURL: root.appendingPathComponent("approvals.json"),
+                approvalSigningSecret: Data("isolated-tmux-approval-secret".utf8)
+            ) == nil)
+        }
+        let manual = SurfaceResumeBindingSnapshot(
+            kind: "custom-agent", command: "custom-agent --resume session", checkpointId: "session",
+            source: "agent-hook", autoResume: false
+        )
+        #expect(Workspace.surfaceResumeStartupInput(
+            manual, autoResumeAgentSessions: true, promptForApproval: false,
+            approvalStoreURL: root.appendingPathComponent("approvals.json"),
+            approvalSigningSecret: Data("isolated-tmux-approval-secret".utf8)
+        ) == nil)
+    }
+
+    @Test func otherProcessDetectedBindingsKeepTheExistingRestoreRoute() throws {
+        for kind in ["ssh", "zellij", "codex"] {
+            let binding = SurfaceResumeBindingSnapshot(
+                kind: kind, command: "\(kind) attach session", checkpointId: "session",
+                source: "process-detected", autoResume: true
+            )
+            #expect(try #require(binding.restoreStartupInput()) == " cmux restore \(kind) session\n")
+        }
+    }
+
     @Test func structuredLaunchCaptureRoundTripsAdditively() throws {
         let binding = SurfaceResumeBindingSnapshot(
             name: "Codex",
