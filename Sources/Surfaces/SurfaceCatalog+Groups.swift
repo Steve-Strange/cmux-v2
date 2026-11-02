@@ -128,6 +128,8 @@ extension SurfaceCatalog {
         optimistic: OptimisticPaneHost? = nil
     ) async throws -> [SurfaceProjection] {
         try validateOwnership(of: group.resources, at: destination)
+        let sshUse = try beginExplicitSSHTransportUse(on: Set(group.resources.map(\.machine)), in: destination.workspaceID)
+        defer { endExplicitSSHTransportUse(sshUse) }
         let scope = beginProjectionMutation(for: group.resources)
         defer { endProjectionMutation(scope) }
         let group = try currentCloudWorkspace(group)?.group ?? group
@@ -295,6 +297,8 @@ extension SurfaceCatalog {
             : (current.map { $0.layout } ?? layout)
         let ids = group.resources
         guard !ids.isEmpty else { throw SurfaceCatalogError.destinationNotFound("empty group") }
+        let sshUse = try beginExplicitSSHTransportUse(on: Set(ids.map(\.machine)))
+        defer { endExplicitSSHTransportUse(sshUse) }
         let created = try host.create(title, focus)
         if let layout {
             var walk = LayoutProjectionWalk(

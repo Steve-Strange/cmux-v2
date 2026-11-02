@@ -198,6 +198,13 @@ extension CmuxTuiSurfaceProvider {
         } else {
             browser.configureCloudBrowser(model: model, url: logicalURL, resourceID: resourceID, request: request)
         }
+        browser.cloudAccess.onExplicitRetry = machine.isSSH ? { [weak self, weak browser] in
+            guard let self, let browser,
+                  let use = try? self.catalog.beginExplicitSSHTransportUse(
+                    on: [self.machine], in: browser.workspaceId
+                  ) else { return }
+            self.catalog.endExplicitSSHTransportUse(use)
+        } : nil
         materializedPanels.insert(browser.id)
         return true
     }

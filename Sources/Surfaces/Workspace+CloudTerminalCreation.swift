@@ -415,6 +415,11 @@ extension Workspace {
             onStart: { [weak self, reservation] in
                 reservation.creationReceipt.beginAttempt()
                 onStart()
+                if let self, !self.isRetiredFromOwningTabManager,
+                   self.cloudPendingCreations[reservation.panelID] === reservation,
+                   let use = try? catalog.beginExplicitSSHTransportUse(on: [reservation.machine], in: self.id) {
+                    catalog.endExplicitSSHTransportUse(use)
+                }
                 self?.restartReservedCloudTerminalPane(reservation)
                 (catalog.provider(for: reservation.machine) as? CmuxTuiSurfaceProvider)?
                     .beginAttachHandshake(for: reservation)

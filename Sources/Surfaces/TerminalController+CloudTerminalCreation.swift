@@ -17,6 +17,7 @@ extension TerminalController {
         guard let provider = try await Self.surfaceProvider(for: machine, catalog: catalog) else {
             throw SurfaceCatalogError.noProvider(machine)
         }
+        let sshUse = try await catalog.beginExplicitSSHTransportUse(on: [machine], in: destination?.workspaceID)
         let token = await catalog.cloudWorkspaceProjectionCoordinator.beginLocalMutation(on: machine)
         do {
         let resource = try await provider.createTerminal(command: command, cwd: cwd, name: name, remoteWorkspaceID: remoteWorkspaceID)
@@ -43,9 +44,11 @@ extension TerminalController {
             payload["surface_id"] = opened.projection.panelID.uuidString
         }
         await catalog.cloudWorkspaceProjectionCoordinator.endLocalMutation(token, on: machine, catalog: catalog)
+        await catalog.endExplicitSSHTransportUse(sshUse)
         return payload
         } catch {
             await catalog.cloudWorkspaceProjectionCoordinator.endLocalMutation(token, on: machine, catalog: catalog)
+            await catalog.endExplicitSSHTransportUse(sshUse)
             throw error
         }
     }

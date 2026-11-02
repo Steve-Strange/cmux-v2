@@ -79,7 +79,8 @@ extension TerminalController {
                     into: destination,
                     focus: focus,
                     reuseExisting: reuse,
-                    remoteView: remoteView
+                    remoteView: remoteView,
+                    explicitOpen: true
                 )
                 return await Self.markBackgroundOpen(Self.surfaceProjectPayload(opened.projection, reused: opened.reused), focus: focus)
             }

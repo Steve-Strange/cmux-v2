@@ -1,7 +1,10 @@
 import CmuxCloud
 import Foundation
 
-struct SurfaceMachineID: Hashable, Sendable { let rawValue: String }
+struct SurfaceMachineID: Hashable, Sendable {
+    let rawValue: String
+    var isSSH: Bool { rawValue.hasPrefix("ssh:") }
+}
 struct SurfaceResourceID: Sendable {
     let machine: SurfaceMachineID
     let key = "term_fixture"
@@ -46,6 +49,7 @@ struct FixtureNewWorkspaceHost { static let appOptimistic = FixtureNewWorkspaceH
     static let shared = SurfaceCatalog()
     var fixtureProvider: CmuxTuiSurfaceProvider?
     let snapshot = 0
+    let cloudWorkspaceRenameService = FixtureRenameService()
     let cloudWorkspaceProjectionCoordinator = FixtureProjectionCoordinator()
     func provider(for machine: SurfaceMachineID) -> CmuxTuiSurfaceProvider? { fixtureProvider }
     // The carrier is real. The catalog host supplies the pane and graph, so the
@@ -54,8 +58,8 @@ struct FixtureNewWorkspaceHost { static let appOptimistic = FixtureNewWorkspaceH
         reuseExisting: Bool, reuseInWorkspace: UUID? = nil, remoteView: SurfaceRemoteView? = nil,
         explicitOpen: Bool = false) async throws -> (projection: SurfaceProjection, reused: Bool) {
         let provider = fixtureProvider!
-        let use = explicitOpen ? provider.beginExplicitSSHTransportUse() : nil
-        defer { if let use { provider.endExplicitSSHTransportUse(use) } }
+        let use = try beginExplicitSSHTransportUse(on: explicitOpen ? [id.machine] : [], in: destination.workspaceID)
+        defer { endExplicitSSHTransportUse(use) }
         _ = try await (provider.links as! SSHTuiLinkManager).connected(machineID: id.machine.rawValue)
         provider.catalog.projections.append(FixtureProjection(workspaceID: destination.workspaceID))
         return (SurfaceProjection(workspaceID: destination.workspaceID), false)
@@ -80,7 +84,7 @@ extension CmuxTuiSurfaceProvider {
 struct SSHExplicitSurfaceIntentFixture {
     @MainActor static func run() async throws {
         var failures: [String] = []
-        for operation in ["UI open", "UI view open", "socket create", "socket create without projection"] {
+        for operation in ["UI open", "UI view open", "socket create", "socket create without projection", "managed UI open"] {
             let probe = CloudCarrierProbe()
             let links = SSHTuiLinkManager(connection: SSHTuiConnection(), clientURL: URL(fileURLWithPath: "/unused"),
                 paths: CloudTuiClientPaths(probe: probe), isEnabled: { true })
@@ -88,13 +92,30 @@ struct SSHExplicitSurfaceIntentFixture {
             let catalog = SurfaceCatalog.shared
             catalog.fixtureProvider = provider
             let local = Workspace()
-            local.usesSSHTui = false
+            local.usesSSHTui = operation == "managed UI open"
             local.remoteConnectionResumeEnabled = false
             AppDelegate.shared?.workspaces = [local]
             await links.disconnect()
             let machine = SurfaceMachineID(rawValue: "ssh:fixture")
+            if operation == "UI open" {
+                do {
+                    _ = try await catalog.project(SurfaceResourceID(machine: machine),
+                        into: .workspace(id: local.id, placement: .tab), focus: false, reuseExisting: false)
+                    failures.append("an automatic projection resumed the carrier")
+                } catch is CancellationError {}
+                let cloudUse = try catalog.beginExplicitSSHTransportUse(on: [SurfaceMachineID(rawValue: "cloud-fixture")])
+                if !cloudUse.isEmpty || !provider.isSSHTransportPaused {
+                    failures.append("a non-SSH action changed SSH intent")
+                }
+                let cancelled = Task { try catalog.beginExplicitSSHTransportUse(on: [machine]) }
+                cancelled.cancel()
+                do {
+                    _ = try await cancelled.value
+                    failures.append("a cancelled open acquired the carrier")
+                } catch is CancellationError {}
+            }
             do {
-                if operation.hasPrefix("UI") {
+                if operation.hasPrefix("UI") || operation == "managed UI open" {
                     _ = try await catalog.projectTerminal(SurfaceResourceID(machine: machine), in: local.id,
                         view: operation == "UI view open" ? SurfaceRemoteView() : nil)
                 } else {
@@ -106,6 +127,12 @@ struct SSHExplicitSurfaceIntentFixture {
             } catch { failures.append(operation + ": " + String(describing: error)) }
             let starts = await probe.starts
             if starts != 1 { failures.append(operation + ": carrier starts=" + String(starts)) }
+            if local.remoteConnectionResumeEnabled != local.usesSSHTui {
+                failures.append(operation + ": incorrect workspace resume intent")
+            }
+            if operation == "socket create without projection", !provider.isSSHTransportPaused {
+                failures.append(operation + ": the create-only carrier outlived its explicit owner")
+            }
             await links.disconnect()
             catalog.fixtureProvider = nil
         }

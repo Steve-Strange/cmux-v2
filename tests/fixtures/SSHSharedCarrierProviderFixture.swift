@@ -45,5 +45,7 @@ enum FixtureLinkState { case unavailable }
     init(links: SSHTuiLinkManager) { self.links = links }
     func installNotificationSync() { notificationSync = true }
     func stopTransportResources() { stopCount += 1; notificationSync = nil }
+    func pauseSSHBrowserRoutes() {}
+    func resumeSSHBrowserRoutes() {}
     func publishLinkStatus(_ state: FixtureLinkState, error: String?) {}
 }

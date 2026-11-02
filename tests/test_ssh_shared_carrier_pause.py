@@ -33,6 +33,7 @@ class SSHSharedCarrierPauseTests(unittest.TestCase):
                     ROOT / "Sources/Surfaces/CmuxTuiSurfaceProvider+SSHTransport.swift",
                     ROOT / "tests/fixtures/SSHSharedCarrierProviderFixture.swift",
                     ROOT / "Sources/Surfaces/SurfaceCatalog+CloudTerminalNavigation.swift",
+                    ROOT / "Sources/Surfaces/SurfaceCatalog+SSHTransport.swift",
                     ROOT / "Sources/Surfaces/TerminalController+CloudTerminalCreation.swift",
                     ROOT / "tests/fixtures/SSHExplicitSurfaceIntentFixture.swift"])
             self.compile(environment, ["-parse-as-library", "-I", str(build), "-L", str(build),

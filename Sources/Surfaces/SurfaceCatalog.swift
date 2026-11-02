@@ -620,8 +620,10 @@ final class SurfaceCatalog {
     /// focus — the resource materializes at `destination` instead. A workspace's own
     /// Desktop row uses this so "open this workspace's screen" never teleports to a
     /// different workspace's VNC pane. Nil keeps the global open-or-focus jump.
+    /// `explicitOpen` opts a deliberate UI/CLI action into resuming SSH. Restores
+    /// and layout reconciliation keep the current transport intent.
     @discardableResult
-    func project(_ id: SurfaceResourceID, into destination: SurfaceDestination, focus: Bool = true, reuseExisting: Bool = true, reuseInWorkspace: UUID? = nil, remoteView: SurfaceRemoteView? = nil, adopting reservation: CloudTerminalPaneReservation? = nil) async throws -> (projection: SurfaceProjection, reused: Bool) {
+    func project(_ id: SurfaceResourceID, into destination: SurfaceDestination, focus: Bool = true, reuseExisting: Bool = true, reuseInWorkspace: UUID? = nil, remoteView: SurfaceRemoteView? = nil, adopting reservation: CloudTerminalPaneReservation? = nil, explicitOpen: Bool = false) async throws -> (projection: SurfaceProjection, reused: Bool) {
         if isDeletingCloudResource(id, remoteWorkspaceID: remoteView?.workspace.id) { throw CancellationError() }
         try validateOwnership(of: [id], at: destination)
         let scope = beginProjectionMutation(for: [id])
@@ -663,6 +665,8 @@ final class SurfaceCatalog {
         } else {
             resolvedRemoteView = nil
         }
+        var sshUse = try beginExplicitSSHTransportUse(on: explicitOpen ? [id.machine] : [], in: destination.workspaceID)
+        defer { endExplicitSSHTransportUse(sshUse) }
         let loadingReservation = CloudMachineLoadingReservation(id, at: destination, remoteView: resolvedRemoteView)
         let materializationKey = MaterializationKey(resource: id, remoteTabID: resolvedRemoteView?.tabID, workspaceID: reuseInWorkspace, loadingPanelID: loadingReservation?.panelID)
         if reuseExisting, let existing = projections.first(where: {
@@ -683,6 +687,18 @@ final class SurfaceCatalog {
                 guard Workspace.liveWorkspace(id: loadingReservation.workspaceID)?.discardCloudMachineLoadingPanel(panelID: loadingReservation.panelID, machineID: loadingReservation.machineID) == true else { throw CancellationError() }
             }
             let resolved = attachRemoteView(resolvedRemoteView, to: existing)
+            if explicitOpen, id.machine.isSSH, let provider = providers[id.machine] as? CmuxTuiSurfaceProvider {
+                if resolved.workspaceID != destination.workspaceID {
+                    sshUse += try beginExplicitSSHTransportUse(on: [id.machine], in: resolved.workspaceID)
+                }
+                if resource.kind == .terminal {
+                    if let session = provider.manualMirrorSessions[resolved.panelID] {
+                        if !session.allowsAutomaticReconnect { _ = session.retryConnection() }
+                    } else {
+                        provider.scheduleRefresh()
+                    }
+                }
+            }
             if resource.kind != .terminal,
                let provider = providers[id.machine] as? CmuxTuiSurfaceProvider,
                let browser = SurfacePaneFactory.browserPanel(panelID: resolved.panelID, in: resolved.workspaceID),

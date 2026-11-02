@@ -41,6 +41,8 @@ final class CloudBrowserAccessState {
     @ObservationIgnored private var navigate: (@MainActor (URL) -> Void)?
     @ObservationIgnored private var navigateRequest: (@MainActor (URLRequest) -> Void)?
     @ObservationIgnored private var pendingNavigationRequest: URLRequest?
+    /// Restores deliberate connection intent before the shared route retries.
+    @ObservationIgnored var onExplicitRetry: (@MainActor () -> Void)?
     @ObservationIgnored private var retiredListenerURLs: [URL] = []
     @ObservationIgnored private var observationGeneration: UInt64 = 0
     @ObservationIgnored private var preservingCommittedRoute = false
@@ -549,6 +551,7 @@ final class CloudBrowserAccessState {
     }
 
     func retry() {
+        onExplicitRetry?()
         attempt += 1
         trace("retry")
         // An explicit retry is a new first connection with its own quiet retries.
@@ -639,6 +642,7 @@ final class CloudBrowserAccessState {
         restoreFailureMessage = nil
         starting = nil
         model = nil
+        onExplicitRetry = nil
         remoteURL = nil
         navigationURL = nil
         hasCommittedNavigation = false

@@ -13,12 +13,14 @@ extension SurfaceCatalog: CloudTerminalNavigationCatalog {
         if let view {
             opened = try await project(
                 resource, into: .workspace(id: workspaceID, placement: .tab),
-                focus: true, reuseExisting: true, reuseInWorkspace: workspaceID, remoteView: view
+                focus: true, reuseExisting: true, reuseInWorkspace: workspaceID, remoteView: view,
+                explicitOpen: true
             )
         } else {
             opened = try await project(
                 resource, into: .workspace(id: workspaceID, placement: .tab),
-                focus: true, reuseExisting: true, reuseInWorkspace: workspaceID
+                focus: true, reuseExisting: true, reuseInWorkspace: workspaceID,
+                explicitOpen: true
             )
         }
         return opened.projection

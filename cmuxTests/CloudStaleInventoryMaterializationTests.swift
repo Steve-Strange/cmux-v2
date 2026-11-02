@@ -1,4 +1,5 @@
 import CmuxCloud
+import CmuxCloudTui
 import CmuxCore
 import CmuxSurfaceCatalogModel
 import Foundation
@@ -152,6 +153,39 @@ struct CloudStaleInventoryMaterializationTests {
 
         #expect(workspace.remoteSessionSnapshot()?.autoReconnect != false)
         #expect(workspace.sshTuiConnectionAttemptID != nil)
+    }
+
+    @Test("only an explicit catalog open resumes a paused SSH provider in a local workspace", arguments: [false, true])
+    func explicitLocalProjectionResumesPausedCarrier(explicitOpen: Bool) async throws {
+        let app = try VaultPaneAppFixture()
+        defer { app.tearDown() }
+        let workspace = app.workspace
+        workspace.remoteConnectionResumeEnabled = false
+        let panelID = try #require(workspace.focusedPanelId)
+        let connection = SSHTuiConnection(configuration: try sshConfiguration())
+        let catalog = SurfaceCatalog()
+        let links = SSHTuiLinkManager(connection: connection, clientURL: URL(fileURLWithPath: "/unused"),
+            paths: CloudTuiClientPaths(), isEnabled: { true })
+        let provider = CmuxTuiSurfaceProvider(summary: .ssh(connection), links: links, catalog: catalog)
+        catalog.register(provider)
+        defer { provider.suspendForFeatureFlag(); catalog.unregister(machine: provider.machine) }
+        let resource = SurfaceResource(id: .init(machine: provider.machine, kind: .terminal, key: "term_explicit"),
+            title: "Terminal", lifecycle: .running)
+        catalog.upsert(resource, from: provider)
+        catalog.record(SurfaceProjection(resource: resource.id, workspaceID: workspace.id, panelID: panelID))
+        await links.disconnect()
+
+        if explicitOpen {
+            _ = try await catalog.project(resource.id, into: .workspace(id: workspace.id, placement: .tab),
+                focus: false, explicitOpen: true)
+        } else {
+            _ = try await catalog.project(resource.id, into: .workspace(id: workspace.id, placement: .tab), focus: false)
+        }
+
+        #expect(provider.isSSHTransportPaused == !explicitOpen)
+        #expect(!workspace.remoteConnectionResumeEnabled,
+                "an independent local projection has no managed-workspace reconnect intent")
+        await links.disconnect()
     }
 
     private func sshConfiguration() throws -> WorkspaceRemoteConfiguration {

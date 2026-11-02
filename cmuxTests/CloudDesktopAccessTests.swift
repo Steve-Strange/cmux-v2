@@ -17,6 +17,26 @@ import WebKit
 @MainActor
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct CloudDesktopAccessTests {
+    @Test("only the browser's explicit Retry restores connection intent")
+    func onlyExplicitRetryRestoresIntent() async {
+        let model = CloudPortAccessModel(target: .init(host: "127.0.0.1", port: 3000), coordinator: nil,
+            wake: {}, startForward: { _ in 43000 }, stopForward: {}, route: .loopback)
+        let state = CloudBrowserAccessState()
+        state.configure(model: model, url: URL(string: "http://localhost:3000")!)
+        var resumes = 0
+        state.onExplicitRetry = { resumes += 1 }
+
+        state.retry()
+        #expect(resumes == 1)
+        model.retry()
+        #expect(resumes == 1, "automatic route recovery must not revive a paused SSH workspace")
+        state.leave()
+        state.retry()
+        #expect(resumes == 1, "a retired browser must release its previous SSH retry owner")
+        state.leave()
+        await model.retire()
+    }
+
     @Test("Route readiness drives cold open and cached retry without a SwiftUI phase update")
     func automaticallyNavigatesAfterRouteReadiness() async throws {
         let ready = CloudLinkFirstValue<Bool>()
