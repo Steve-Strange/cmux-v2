@@ -136,6 +136,10 @@ final class SSHTuiWorkspaceCoordinator {
             case .failed(let error):
                 workspace.applyRemoteConnectionStateUpdate(.error, detail: CloudMachineLink.errorText(error), target: configuration.displayTarget)
                 guard !SSHTuiAttachRetryPolicy.isPermanent(error) else {
+                    // Passive catalog/link updates must not reattempt rejected
+                    // authentication. The explicit Reconnect action starts a
+                    // new attempt after the user repairs credentials or trust.
+                    guard !SSHTuiAttachRetryPolicy.requiresManualAuthentication(error) else { return }
                     // Park so a later link-up still recovers the workspace
                     // and retracts this error, without a manual Reconnect.
                     self.recoveries[workspace.id] = Recovery(
@@ -405,9 +409,8 @@ final class SSHTuiWorkspaceCoordinator {
         guard let reservation = workspace.reserveCloudTerminalPane(
             machine: machine, at: .workspace(id: workspace.id, placement: .tab), focus: focus
         ) else { return nil }
-        reservation.retry = { [weak self, weak workspace] in
-            guard let self, let workspace else { return }
-            self.connect(workspace: workspace, configuration: configuration)
+        reservation.retry = { [weak workspace] in
+            _ = workspace?.reconnectRemoteConnection()
         }
         for panelID in scaffold { SurfacePaneFactory.close(panelID: panelID, in: workspace.id) }
         return reservation
@@ -431,6 +434,10 @@ final class SSHTuiWorkspaceCoordinator {
         }
         for projection in catalog.projections where projection.workspaceID == workspace.id && projection.resource.machine.isSSH {
             let provider = catalog.provider(for: projection.resource.machine) as? CmuxTuiSurfaceProvider
+            provider?.restoredAttachTasks.removeValue(forKey: projection.panelID)?.cancel()
+            if provider?.manualMirrorSessions[projection.panelID] == nil {
+                provider?.materializedPanels.remove(projection.panelID)
+            }
             _ = provider?.manualMirrorSessions[projection.panelID]?.cancelConnectionAttempt()
             if !ManagedRemoteConnectionsPolicy.isEnabled, let manager = provider?.links as? SSHTuiLinkManager {
                 Task { await manager.disconnect() }

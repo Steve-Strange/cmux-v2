@@ -84,8 +84,22 @@ extension CmuxTuiSurfaceProvider {
     /// armed on the bounded backoff and runs through the ordinary refresh,
     /// which re-reads the graph before resolving again.
     func scheduleAttachmentRetry() {
+        let lifecycle = currentLifecycleGeneration
         let delay = attachmentRetry.scheduleRetry { [weak self] in
-            self?.scheduleRefresh()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.refreshCoordinator.refresh(force: false) { [weak self] force in
+                    guard let self, self.isCurrentLifecycleGeneration(lifecycle),
+                          self.isRegisteredInCatalog() else { return false }
+                    // A user may disconnect or close the last SSH pane after
+                    // the timer was armed, or while this refresh was queued.
+                    // Re-read intent inside the refresh owner's operation.
+                    guard !self.machine.isSSH
+                            || self.manualMirrorSessions.values.contains(where: \.allowsAutomaticReconnect)
+                    else { return false }
+                    return await self.performRefresh(force: force)
+                }
+            }
         }
         attachmentLog.retry(machineID: machineID, failures: attachmentRetry.failures, delay: delay)
     }

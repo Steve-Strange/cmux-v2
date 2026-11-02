@@ -34,10 +34,22 @@ struct RemoteBootstrapRetryPolicy: Sendable {
         fingerprint: String,
         previousFingerprint: String?,
         previousConsecutiveFailures: Int,
-        previousTotalFailures: Int
+        previousTotalFailures: Int,
+        keepsRecoveringOffline: Bool = false
     ) -> Evaluation {
         let normalizedFingerprint = fingerprint
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        // An unavailable network cannot prove the remote installation is bad.
+        // Persistent workspaces keep their reconnect backoff without spending
+        // the bounded budget reserved for failures that repeating cannot fix.
+        if keepsRecoveringOffline, normalizedFingerprint.hasSuffix(":network") {
+            return Evaluation(
+                fingerprint: normalizedFingerprint,
+                consecutiveFailures: 0,
+                totalFailures: max(0, previousTotalFailures),
+                decision: .retry
+            )
+        }
         let consecutiveFailures = previousFingerprint == normalizedFingerprint
             ? max(0, previousConsecutiveFailures) + 1
             : 1
@@ -81,6 +93,15 @@ struct RemoteBootstrapRetryPolicy: Sendable {
             return "blocked"
         } else if message.contains("verification") || message.contains("checksum") || message.contains("hash") {
             return "integrity"
+        } else if [
+            "network is unreachable", "network is down", "no route to host",
+            "connection timed out", "operation timed out", "ssh timed out", "scp timed out",
+            "connection refused", "connection reset",
+            "broken pipe", "can't assign requested address", "cannot assign requested address",
+            "could not resolve hostname", "temporary failure in name resolution",
+            "nodename nor servname provided", "connection closed", "connection aborted"
+        ].contains(where: message.contains) {
+            return "network"
         } else if message.contains("hello") || message.contains("json") {
             return "hello"
         } else if message.contains("upload") || message.contains("transfer") {

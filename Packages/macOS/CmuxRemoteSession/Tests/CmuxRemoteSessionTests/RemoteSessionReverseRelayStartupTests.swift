@@ -48,6 +48,9 @@ struct RemoteSessionReverseRelayStartupTests {
             ) == .tooManyAuthenticationFailures
         )
         #expect(
+            RemoteRelayAuthenticationFailure.detect(in: "Host key verification failed.") == .hostKeyVerificationFailed
+        )
+        #expect(
             RemoteRelayAuthenticationFailure.detect(
                 in: "Permission denied: caller-controlled diagnostic"
             ) == nil
@@ -55,6 +58,7 @@ struct RemoteSessionReverseRelayStartupTests {
         for diagnostic in [
             "debug1: ProxyCommand echo Permission denied (publickey).",
             "debug1: echo Too many authentication failures",
+            "debug1: echo Host key verification failed.",
             "Permission denied (secret-canary).",
             "user@example.test: Permission denied (publickey). secret-canary",
             "Permission denied (publickey).\nError: remote port forwarding failed for listen port 64044",

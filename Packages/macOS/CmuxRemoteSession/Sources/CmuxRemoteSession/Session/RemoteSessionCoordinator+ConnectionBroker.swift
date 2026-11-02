@@ -3,7 +3,7 @@ internal import Foundation
 extension RemoteSessionCoordinator {
     /// Queues one complete blocking connection attempt through the per-host broker.
     func requestConnectionAttemptLocked() {
-        guard !isStopping, connectionAttemptTask == nil else { return }
+        guard !isStopping, !isSystemSleeping, !reconnectSuspended, connectionAttemptTask == nil else { return }
         let token = UUID()
         let configuration = self.configuration
         let connectionBroker = self.connectionBroker
@@ -28,7 +28,7 @@ extension RemoteSessionCoordinator {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.async { [self] in
                 defer { continuation.resume() }
-                guard connectionAttemptToken == token, !isStopping else { return }
+                guard connectionAttemptToken == token, !isStopping, !isSystemSleeping, !reconnectSuspended else { return }
                 connectionAttemptTask = nil
                 connectionAttemptToken = nil
                 beginConnectionAttemptLocked()

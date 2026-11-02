@@ -5,9 +5,13 @@ internal import Foundation
 /// The relay receives arbitrary stderr from the user's SSH configuration. Only
 /// the stable authentication markers below are promoted to user-facing state;
 /// the original stderr is never logged or copied into a parked-session detail.
-enum RemoteRelayAuthenticationFailure: Equatable, Sendable {
+public enum RemoteRelayAuthenticationFailure: Equatable, Sendable {
+    /// OpenSSH exhausted the server's accepted authentication methods.
     case permissionDenied(methods: String)
+    /// OpenSSH rejected the attempt after too many identities were offered.
     case tooManyAuthenticationFailures
+    /// The endpoint's host key could not be verified.
+    case hostKeyVerificationFailed
 
     var logLabel: String {
         switch self {
@@ -15,6 +19,8 @@ enum RemoteRelayAuthenticationFailure: Equatable, Sendable {
             return "permission-denied"
         case .tooManyAuthenticationFailures:
             return "too-many-authentication-failures"
+        case .hostKeyVerificationFailed:
+            return "host-key-verification-failed"
         }
     }
 
@@ -25,10 +31,16 @@ enum RemoteRelayAuthenticationFailure: Equatable, Sendable {
             return "Permission denied (\(methods))."
         case .tooManyAuthenticationFailures:
             return "Too many authentication failures."
+        case .hostKeyVerificationFailed:
+            return "Host key verification failed."
         }
     }
 
-    static func detect(in detail: String) -> Self? {
+    /// Classifies canonical OpenSSH stderr without treating arbitrary log text as authentication.
+    ///
+    /// - Parameter detail: Unmodified SSH stderr, including any preceding diagnostic lines.
+    /// - Returns: The authentication or host-key failure, or `nil` for retryable or unknown errors.
+    public static func detect(in detail: String) -> Self? {
         let lines = detail
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -43,6 +55,9 @@ enum RemoteRelayAuthenticationFailure: Equatable, Sendable {
 
         for line in lines.reversed() {
             guard !line.lowercased().hasPrefix("debug") else { continue }
+            if line == "Host key verification failed." {
+                return .hostKeyVerificationFailed
+            }
             if let methods = permissionDeniedMethods(in: line) {
                 return .permissionDenied(methods: methods)
             }

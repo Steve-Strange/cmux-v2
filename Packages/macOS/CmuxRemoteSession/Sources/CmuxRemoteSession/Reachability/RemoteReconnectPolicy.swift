@@ -1,10 +1,12 @@
-/// Pure decision logic for the SSH remote workspace auto-reconnect loop
+/// Reachability decisions for temporary SSH workspace auto-reconnect loops
 /// (https://github.com/manaflow-ai/cmux/issues/5734).
 ///
 /// While the host stays reachable the loop keeps its existing exponential
 /// backoff behavior. Once consecutive reachability probes keep failing, the
 /// loop should suspend instead of retrying indefinitely, leaving the user in
 /// control of when reconnection happens.
+/// Persistent workspaces retain this accounting while their coordinator keeps
+/// a capped backoff retry armed through the outage.
 ///
 /// Lifted from the app's `WorkspaceRemoteReconnectPolicy` namespace enum,
 /// converted to a stateless value type per the no-namespace-enums convention.

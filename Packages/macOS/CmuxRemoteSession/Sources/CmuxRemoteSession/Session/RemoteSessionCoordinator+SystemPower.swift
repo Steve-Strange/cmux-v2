@@ -8,11 +8,12 @@ extension RemoteSessionCoordinator {
         }
     }
 
-    /// Clears any terminal reconnect suspension after an external re-arm signal.
+    /// Re-arms automatic transport recovery after an external signal.
     ///
     /// A reconnect is scheduled when the coordinator was suspended or no longer
     /// has a ready proxy. Healthy connections are left in place; a transport
     /// failure delivered after wake will schedule through the freshly reset policy.
+    /// Authentication and host-key failures still require a manual Reconnect.
     ///
     /// - Parameter reason: A diagnostic label for the re-arm signal.
     public func resetReconnectPolicyAndReconnect(reason: String) {
@@ -28,6 +29,7 @@ extension RemoteSessionCoordinator {
     func prepareForSystemSleepLocked() {
         guard !isStopping else { return }
         isSystemSleeping = true
+        cancelConnectionAttemptLocked()
         cancelReconnectRetryLocked()
         // The deadline measures time spent seeking readiness, not time asleep;
         // the post-wake reconnect arms a fresh one.
@@ -39,11 +41,18 @@ extension RemoteSessionCoordinator {
     @discardableResult
     func resetReconnectPolicyLocked(reason: String) -> Bool {
         guard !isStopping else { return false }
+        isSystemSleeping = false
+        // A network transition cannot unlock a key, complete MFA, or approve a
+        // changed host key. Only the explicit Reconnect path replaces this
+        // coordinator and releases its authentication verdict.
+        if parkedState?.cause == .sshAuthenticationFailed ||
+            (parkedState?.cause == .bootstrapFailed && bootstrapFailureFingerprint?.hasSuffix(":blocked") == true) {
+            return false
+        }
         let expectsProxyEndpoint = !configuration.skipDaemonBootstrap ||
             configuration.daemonWebSocketEndpoint != nil
         let shouldReconnect = reconnectSuspended || reconnectRetryCount > 0 ||
             (expectsProxyEndpoint && proxyEndpoint == nil) || !daemonReady
-        isSystemSleeping = false
         cancelReconnectRetryLocked()
         reconnectRetryCount = 0
         consecutiveUnreachableProbeCount = 0

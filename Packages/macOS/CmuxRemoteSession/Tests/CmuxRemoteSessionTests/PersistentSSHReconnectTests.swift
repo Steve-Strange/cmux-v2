@@ -93,6 +93,82 @@ struct PersistentSSHReconnectTests {
         #expect(coordinator.queue.sync { coordinator.connectionAttemptTask == nil })
     }
 
+    @Test("System sleep cancels an attempt still waiting for its host broker")
+    func sleepCancelsQueuedConnectionAttempt() {
+        let coordinator = makeCoordinator()
+        defer { coordinator.stop(); coordinator.queue.sync {} }
+
+        coordinator.queue.sync {
+            coordinator.requestConnectionAttemptLocked()
+            coordinator.prepareForSystemSleepLocked()
+        }
+
+        #expect(coordinator.queue.sync { coordinator.isSystemSleeping })
+        #expect(coordinator.queue.sync { coordinator.connectionAttemptTask == nil })
+        #expect(coordinator.queue.sync { coordinator.connectionAttemptToken == nil })
+    }
+
+    @Test("A network outage pauses the readiness deadline until the host is reachable")
+    func offlineTimeDoesNotExhaustReadinessDeadline() {
+        let coordinator = makeCoordinator()
+        defer { coordinator.stop(); coordinator.queue.sync {} }
+
+        coordinator.queue.sync {
+            coordinator.proxyConnectionDesired = true
+            coordinator.daemonReady = true
+            coordinator.armReadinessDeadlineLocked()
+            coordinator.scheduleReconnectLocked(baseDelay: 4)
+            coordinator.handleReachabilityProbeOutcomeLocked(
+                .unreachable(reason: "No route to host"), generation: coordinator.reachabilityProbeGeneration
+            )
+        }
+        #expect(coordinator.queue.sync { coordinator.readinessDeadlineToken == nil })
+        #expect(coordinator.queue.sync { !coordinator.reconnectSuspended })
+
+        coordinator.queue.sync {
+            coordinator.handleReachabilityProbeOutcomeLocked(
+                .reachable, generation: coordinator.reachabilityProbeGeneration
+            )
+        }
+        #expect(coordinator.queue.sync { coordinator.readinessDeadlineToken != nil })
+    }
+
+    @Test("Recognized SSH network failures keep persistent recovery armed", arguments: [
+        "Network is unreachable", "Connection timed out", "ssh timed out after 20s",
+        "Connection refused", "Connection reset by peer", "client_loop: send disconnect: Broken pipe",
+        "Can't assign requested address", "Could not resolve hostname host: nodename nor servname provided"
+    ])
+    func recognizedNetworkFailuresKeepRetrying(detail: String) {
+        let policy = RemoteBootstrapRetryPolicy()
+        let fingerprint = RemoteBootstrapRetryPolicy.fingerprint(for: NSError(
+            domain: "cmux.remote.daemon", code: 11, userInfo: [NSLocalizedDescriptionKey: detail]
+        ))
+        let evaluation = policy.evaluate(
+            fingerprint: fingerprint, previousFingerprint: fingerprint,
+            previousConsecutiveFailures: 12, previousTotalFailures: 12,
+            keepsRecoveringOffline: true
+        )
+        #expect(evaluation.decision == .retry)
+        #expect(evaluation.totalFailures == 12)
+    }
+
+    @Test("Authentication and corrupt installs still pause a persistent workspace", arguments: [
+        "Permission denied (publickey).", "Host key verification failed.", "daemon checksum mismatch",
+        "daemon checksum mismatch after connection reset"
+    ])
+    func nonNetworkFailuresStayBounded(detail: String) {
+        let policy = RemoteBootstrapRetryPolicy()
+        let fingerprint = RemoteBootstrapRetryPolicy.fingerprint(for: NSError(
+            domain: "cmux.remote.daemon", code: 11, userInfo: [NSLocalizedDescriptionKey: detail]
+        ))
+        let evaluation = policy.evaluate(
+            fingerprint: fingerprint, previousFingerprint: fingerprint,
+            previousConsecutiveFailures: 12, previousTotalFailures: 12,
+            keepsRecoveringOffline: true
+        )
+        #expect(evaluation.decision == .suspend)
+    }
+
     private func makeCoordinator(
         runner: any RemoteSessionProcessRunning = IntentionalCleanupUnusedProcessRunner()
     ) -> RemoteSessionCoordinator {

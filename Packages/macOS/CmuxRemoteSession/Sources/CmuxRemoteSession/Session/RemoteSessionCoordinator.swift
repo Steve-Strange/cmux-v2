@@ -380,11 +380,15 @@ public final class RemoteSessionCoordinator: @unchecked Sendable {
                 fingerprint: RemoteBootstrapRetryPolicy.fingerprint(for: error),
                 previousFingerprint: bootstrapFailureFingerprint,
                 previousConsecutiveFailures: bootstrapFailureCount,
-                previousTotalFailures: bootstrapFailureTotal
+                previousTotalFailures: bootstrapFailureTotal,
+                keepsRecoveringOffline: keepsRecoveringOffline
             )
             bootstrapFailureFingerprint = evaluation.fingerprint
             bootstrapFailureCount = evaluation.consecutiveFailures
             bootstrapFailureTotal = evaluation.totalFailures
+            if keepsRecoveringOffline, evaluation.fingerprint.hasSuffix(":network") {
+                cancelReadinessDeadlineLocked()
+            }
             switch evaluation.decision {
             case .retry:
                 let retrySchedule = scheduleReconnectLocked(baseDelay: 4.0)

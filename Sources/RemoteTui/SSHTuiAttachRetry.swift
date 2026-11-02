@@ -1,4 +1,5 @@
 import CmuxCloud
+import CmuxRemoteSession
 import CmuxSurfaceCatalogModel
 import Foundation
 
@@ -39,9 +40,23 @@ struct SSHTuiAttachRetryPolicy: Sendable {
     /// retrying in the background and waits for Reconnect or a link-up.
     static func isPermanent(_ error: Error) -> Bool {
         if error is CancellationError { return true }
+        if requiresManualAuthentication(error) { return true }
         if let failure = error as? CloudDiagnosticFailure, failure == .unsupported { return true }
         if case CloudMachineLink.LinkError.clientMissing? = error as? CloudMachineLink.LinkError { return true }
         return CloudMachineAccessLoss(error: error) != nil
+    }
+
+    /// A link becoming available cannot repair rejected credentials or an unverified host key.
+    static func requiresManualAuthentication(_ error: Error) -> Bool {
+        guard let error = error as? CloudMachineLink.LinkError else { return false }
+        let detail: String
+        switch error {
+        case .exited(_, let output), .failureMessage(let output):
+            detail = output
+        default:
+            return false
+        }
+        return RemoteRelayAuthenticationFailure.detect(in: detail) != nil
     }
 
     /// Whether a waiting or failed attach should retry now instead of

@@ -1,11 +1,14 @@
 internal import Foundation
 
-// Reconnect backoff scheduling and the reachability-based suspend policy
-// (https://github.com/manaflow-ai/cmux/issues/5734). Faithful lift; the
-// legacy `asyncAfter` work item became an injected-clock task whose wakeup is
-// guarded by a token (strictly tighter than the legacy work-item cancel) —
-// delays, retry numbering, and suffix strings are identical.
+// Reconnect backoff is shared by transient and persistent SSH workspaces.
+// A persistent workspace keeps seeking its remote PTYs through long outages;
+// temporary connections retain the reachability-based suspend policy.
 extension RemoteSessionCoordinator {
+    /// Persistent SSH workspaces keep their recovery intent through network outages.
+    var keepsRecoveringOffline: Bool {
+        configuration.transport == .ssh && configuration.preserveAfterTerminalExit
+    }
+
     @discardableResult
     func scheduleReconnectLocked(baseDelay: TimeInterval) -> RetrySchedule {
         let retryNumber = reconnectRetryCount + 1
@@ -53,10 +56,8 @@ extension RemoteSessionCoordinator {
     }
 
     /// Probe whether the SSH endpoint is reachable at all after a failed
-    /// connection attempt. While the host stays unreachable the retry loop is
-    /// allowed a short streak of attempts (absorbing sleep/wake and network
-    /// handoffs) and then suspends instead of retrying indefinitely
-    /// (https://github.com/manaflow-ai/cmux/issues/5734).
+    /// connection attempt. Temporary connections suspend after repeated failed
+    /// probes; persistent workspaces retain their capped backoff retry.
     func evaluateReconnectPolicyLocked() {
         guard configuration.transport == .ssh else { return }
         reachabilityProbeGeneration &+= 1
@@ -91,9 +92,17 @@ extension RemoteSessionCoordinator {
         debugLog(
             "remote.session.reachability outcome=\(Self.debugDescription(for: outcome)) " +
             "streak=\(evaluation.consecutiveUnreachableProbes) " +
-            "decision=\(evaluation.decision == .suspend ? "suspend" : "retry") \(debugConfigSummary())"
+            "decision=\(evaluation.decision == .suspend && !keepsRecoveringOffline ? "suspend" : "retry") \(debugConfigSummary())"
         )
-        if evaluation.decision == .suspend {
+        if keepsRecoveringOffline {
+            if case .unreachable = outcome {
+                // An offline host says nothing about relay configuration.
+                // Give readiness a fresh deadline once the host answers again.
+                cancelReadinessDeadlineLocked()
+            } else if outcome == .reachable, daemonReady {
+                armReadinessDeadlineLocked()
+            }
+        } else if evaluation.decision == .suspend {
             suspendAutoReconnectLocked()
         }
     }
