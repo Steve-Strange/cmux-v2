@@ -44,6 +44,8 @@ The build uses the upstream CI setting `CMUX_SKIP_ZIG_BUILD=1`. Terminal renderi
 uses the verified GhosttyKit framework; the separate Ghostty command helper is
 a stub in this build. The computer-use helper and other native Rust components
 are built from their upstream pinned sources.
+The supported Swift frontend workaround disables batch compilation, debug
+symbols, and AArch64 GlobalISel for this build to avoid known frontend spins.
 
 For a local build, install full Xcode 26 with its Metal compiler, Rust through
 rustup, and GitHub CLI with a read-capable authenticated session. Command Line

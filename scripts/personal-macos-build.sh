@@ -80,7 +80,7 @@ unset CMUX_TUI_CLIENT_LOCAL CMUX_SKIP_CMUX_TUI_CLIENT CMUX_ALLOW_UNSIGNED_DEV_AP
 export CMUX_DEV_BACKEND_MODE=local
 export CMUX_GHOSTTYKIT_PREPROVISIONED=1
 export CMUX_SKIP_ZIG_BUILD=1
-./scripts/reload.sh --tag "$BUILD_TAG" --no-global-cli-links \
+./scripts/reload.sh --tag "$BUILD_TAG" --no-global-cli-links --swift-frontend-workaround \
   --derived-data "$DERIVED_DATA" --cmux-tui-manifest-url "$MANIFEST_URL" \
   2>&1 | tee -a "$BUILD_LOG"
 
@@ -131,6 +131,7 @@ receipt = {
     "signing": "ad-hoc",
     "backend": "local",
     "ghosttyCLIHelper": "stub (upstream CI mode)",
+    "swiftFrontendWorkaround": True,
     "appLaunched": False,
     "appHostTestTargetCompiled": False,
     "appHostTestsExecuted": False,
