@@ -63,11 +63,17 @@ jobs:
           swift test --package-path Packages/macOS/CmuxCore --filter SessionRemoteWorkspaceSnapshotTests 2>&1 | tee build/personal-macos/snapshot-tests.log
       - name: Test SSH attachments and connection presentation
         run: |
+          if ! command -v tmux >/dev/null 2>&1; then
+            brew install tmux
+          fi
           python3 tests/test_terminal_connection_presentation.py
           python3 tests/test_sidebar_remote_status_refresh.py
           python3 tests/test_ssh_attachment_reconnect_intent.py
           python3 tests/test_ssh_shared_carrier_pause.py
           python3 tests/test_ssh_browser_forward_lifecycle.py
+          python3 tests/test_cloud_link_transport_state.py
+          python3 tests/test_tmux_detected_new_session.py
+          python3 tests/test_ssh_startup_budget.py
       - name: Build and archive personal app
         run: ./scripts/personal-macos-build.sh --tag steve-ssh
       - name: Prepare candidate build logs
