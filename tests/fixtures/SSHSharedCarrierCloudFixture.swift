@@ -6,8 +6,26 @@ public actor CloudCarrierProbe {
     public init() {}
     public private(set) var starts = 0
     public private(set) var stops = 0
+    private var holdStop = false
+    private var heldStop: CheckedContinuation<Void, Never>?
+    private var stopObserver: CheckedContinuation<Void, Never>?
     public func started() { starts += 1 }
-    public func stopped() { stops += 1 }
+    public func holdNextStop() { holdStop = true }
+    public func waitUntilStopHeld() async {
+        guard heldStop == nil else { return }
+        await withCheckedContinuation { stopObserver = $0 }
+    }
+    public func releaseStop() { heldStop?.resume(); heldStop = nil }
+    public func stopped() async {
+        stops += 1
+        guard holdStop else { return }
+        holdStop = false
+        await withCheckedContinuation { continuation in
+            heldStop = continuation
+            stopObserver?.resume()
+            stopObserver = nil
+        }
+    }
 }
 public struct CloudTuiClientPaths: Sendable {
     public let stateDir = URL(fileURLWithPath: "/unused")
@@ -29,6 +47,7 @@ public struct SSHTuiConnection: Sendable {
     public var agentHookProviders: [String] = []
     public var sshProcessEnvironment: [String: String] { [:] }
     public init() {}
+    public init(configuration: FixtureSSHConfiguration) {}
     public func browserArguments(stateDirectory: String) -> [String] { [] }
     public func arguments(stateDirectory: String, deviceName: String) -> [String] { [] }
 }

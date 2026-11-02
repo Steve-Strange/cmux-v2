@@ -6,6 +6,8 @@ import CmuxCore
 /// Owns one SSH carrier and shares it between native projections and control requests.
 actor SSHTuiLinkManager: RemoteTuiLinkManaging {
     nonisolated let operations: CloudOperationRecorder? = nil
+    nonisolated let transportIntent = SSHTuiTransportIntent()
+    private var observedIntentRevision: UInt64 = 0
     /// The current connection is internal for app-host tests that verify an
     /// idle carrier adopts a replacement authentication agent.
     var connection: SSHTuiConnection
@@ -43,7 +45,8 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
     func connected(machineID: String, preflight: Bool, upgrade: Bool = false) async throws -> CloudMachineLink.Connected {
         guard machineID == connection.id else { throw CancellationError() }
         guard isEnabled() else { await disconnect(); throw CancellationError() }
-        if let current, await current.isConnected, let ready = await current.connected { return ready }
+        let revision = try await requireConnectionIntent()
+        if let ready = try await readyConnection(revision: revision) { return ready }
         // The preflight spends from a new carrier's startup budget, which the
         // socket call's own deadline was sized around. A carrier a restore
         // started during the check keeps its own budget.
@@ -58,20 +61,25 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
             defer { if checking == check { checking = nil } }
             let failure: Error?
             do { try await check.value; failure = nil } catch { failure = error }
-            try Task.checkCancellation()
+            try await requireConnectionIntent(revision)
             guard isEnabled() else { await disconnect(); throw CancellationError() }
             // A carrier that logged in meanwhile answers the open, whatever
             // the check reported before it.
-            if let current, await current.isConnected, let ready = await current.connected { return ready }
+            if let ready = try await readyConnection(revision: revision) { return ready }
             if let failure { throw failure }
         }
-        if let connecting { return try await connecting.value }
+        if let connecting {
+            let ready = try await connecting.value
+            try await requireConnectionIntent(revision)
+            return ready
+        }
         let link = CloudMachineLink(machineID: machineID, clientURL: clientURL, paths: paths)
         current = link
         var carrier = connection
         carrier.agentHookProviders = agentHookProviders()
         let attempt = Task { [carrier] in
-            try await link.connect(route: "ssh://" + connection.configuration.destination,
+            try await self.requireConnectionIntent(revision)
+            return try await link.connect(route: "ssh://" + connection.configuration.destination,
                                    session: connection.session, carrier: true,
                                    timeout: deadline - ContinuousClock.now, ssh: carrier,
                                    sshUpgrade: upgrade)
@@ -80,6 +88,7 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
         defer { if connecting == attempt { connecting = nil } }
         do {
             let ready = try await attempt.value
+            try await requireConnectionIntent(revision)
             guard connecting == attempt, !attempt.isCancelled, isEnabled() else { throw CancellationError() }
             return ready
         } catch {
@@ -87,6 +96,25 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
             if current === link { current = nil }
             throw error
         }
+    }
+
+    @discardableResult
+    private func requireConnectionIntent(_ expected: UInt64? = nil) async throws -> UInt64 {
+        let revision = try await transportIntent.connectionRevision()
+        guard expected == nil || expected == revision else { throw CancellationError() }
+        observedIntentRevision = max(observedIntentRevision, revision)
+        return revision
+    }
+
+    private func readyConnection(revision: UInt64) async throws -> CloudMachineLink.Connected? {
+        guard let observed = current else { return nil }
+        let isConnected = await observed.isConnected
+        try await requireConnectionIntent(revision)
+        guard current === observed, isConnected else { return nil }
+        let ready = await observed.connected
+        try await requireConnectionIntent(revision)
+        guard current === observed else { throw CancellationError() }
+        return ready
     }
 
     /// The OpenSSH options the next carrier dials with.
@@ -135,18 +163,30 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
 
     func browserProxy(machineID: String, remoteNetwork: Bool = false) async throws -> CloudBrowserProxyEndpoint {
         guard machineID == connection.id else { throw CancellationError() }
+        let revision = try await requireConnectionIntent()
         _ = try await connected(machineID: machineID)
-        if let browser, let ready = await browser.readyEndpoint { return ready }
-        if let browserStarting { return try await browserStarting.value }
+        try await requireConnectionIntent(revision)
+        if let browser, let ready = await browser.readyEndpoint {
+            try await requireConnectionIntent(revision)
+            return ready
+        }
+        if let browserStarting {
+            let ready = try await browserStarting.value
+            try await requireConnectionIntent(revision)
+            return ready
+        }
         let proxy = CloudBrowserProxyProcess(addresses: ["127.0.0.1", "localhost", "::1"])
         browser = proxy
         let task = Task {
-            try await proxy.start(client: clientURL, arguments: connection.browserArguments(stateDirectory: paths.stateDir.path),
+            try await self.requireConnectionIntent(revision)
+            return try await proxy.start(client: clientURL, arguments: connection.browserArguments(stateDirectory: paths.stateDir.path),
                                   environment: connection.sshProcessEnvironment, releaseHub: {})
         }
         browserStarting = task
         defer { if browserStarting == task { browserStarting = nil } }
-        return try await task.value
+        let ready = try await task.value
+        try await requireConnectionIntent(revision)
+        return ready
     }
 
     /// The local listener port for one loopback port on the SSH host, started
@@ -155,7 +195,7 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
     func loopbackForward(machineID: String, port: Int,
                          onExit: @escaping @Sendable () -> Void = {}) async throws -> UInt16 {
         guard machineID == connection.id, (1...Int(UInt16.max)).contains(port) else { throw CancellationError() }
-        try Task.checkCancellation()
+        let revision = try await requireConnectionIntent()
         // A pane owns this await, but the carrier is shared with terminals and
         // other browser panes. Race the shared connection wait against the
         // pane's cancellation so closing one route returns immediately without
@@ -164,13 +204,21 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
         // The access model may have been stopped while the carrier was
         // connecting. A completed carrier must never resurrect that route by
         // launching a new forward after cancellation.
-        try Task.checkCancellation()
+        try await requireConnectionIntent(revision)
         // Each await can interleave with another caller, so re-read the tables
         // until this caller either joins a forward or owns a fresh start.
         while true {
-            if let starting = loopbackForwardStarts[port] { return try await starting.value }
+            try await requireConnectionIntent(revision)
+            if let starting = loopbackForwardStarts[port] {
+                let ready = try await starting.value
+                try await requireConnectionIntent(revision)
+                return ready
+            }
             guard let existing = loopbackForwards[port] else { break }
-            if let ready = await existing.readyPort, loopbackForwards[port] === existing { return ready }
+            if let ready = await existing.readyPort, loopbackForwards[port] === existing {
+                try await requireConnectionIntent(revision)
+                return ready
+            }
             guard loopbackForwards[port] === existing, loopbackForwardStarts[port] == nil else { continue }
             loopbackForwards[port] = nil
             await existing.stop()
@@ -181,7 +229,8 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
         let arguments = loopbackForwardArguments(port: port)
         let environment = connection.sshProcessEnvironment
         let task = Task {
-            try await forward.start(client: client, arguments: arguments, environment: environment, onExit: onExit)
+            try await self.requireConnectionIntent(revision)
+            return try await forward.start(client: client, arguments: arguments, environment: environment, onExit: onExit)
         }
         loopbackForwardStarts[port] = task
         defer { if loopbackForwardStarts[port] == task { loopbackForwardStarts[port] = nil } }
@@ -189,6 +238,7 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
             // A cancelled route (pane closed, model stopped) stops the child now,
             // not after the start timeout.
             let ready = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            try await requireConnectionIntent(revision)
             guard loopbackForwards[port] === forward, isEnabled() else { throw CancellationError() }
             return ready
         } catch {
@@ -232,6 +282,13 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
 
     /// Detaching a Mac closes its carrier, never the daemon or its terminal processes.
     func disconnect() async {
+        guard let revision = await transportIntent.pause(force: true) else { return }
+        await disconnect(ifPausedAt: revision)
+    }
+
+    /// A late teardown must never stop a newer explicit reconnect.
+    func disconnect(ifPausedAt revision: UInt64) async {
+        guard await transportIntent.isPaused(at: revision), revision >= observedIntentRevision else { return }
         let previous = current
         current = nil
         let attempt = connecting
@@ -243,12 +300,14 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
         browserStarting = nil
         let proxy = browser
         browser = nil
-        await proxy?.stop()
         let starts = loopbackForwardStarts.values
         loopbackForwardStarts.removeAll()
         starts.forEach { $0.cancel() }
         let forwards = loopbackForwards.values
         loopbackForwards.removeAll()
+        // Capture every old resource before suspending. A new resume can then
+        // install its own carrier/forward without this teardown touching it.
+        await proxy?.stop()
         for forward in forwards { await forward.stop() }
         await previous?.disconnect()
     }

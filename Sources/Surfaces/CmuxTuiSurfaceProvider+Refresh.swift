@@ -3,12 +3,12 @@ import Foundation
 
 extension CmuxTuiSurfaceProvider {
     func isCurrentLifecycleGeneration(_ generation: UInt64) -> Bool {
-        !isFeatureSuspended && lifecycleGeneration == generation
+        !isFeatureSuspended && !isSSHTransportPaused && lifecycleGeneration == generation
     }
     /// The generation to capture before detached work that touches panes.
     var currentLifecycleGeneration: UInt64 { lifecycleGeneration }
     func isCurrentRefresh(lifecycle: UInt64, refresh: UInt64) -> Bool {
-        !isFeatureSuspended && lifecycleGeneration == lifecycle
+        !isFeatureSuspended && !isSSHTransportPaused && lifecycleGeneration == lifecycle
             && refreshGeneration == refresh
             && isRegisteredInCatalog()
     }

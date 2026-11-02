@@ -17,7 +17,7 @@ class SSHSharedCarrierPauseTests(unittest.TestCase):
                        if key in {"PATH", "HOME", "TMPDIR", "DEVELOPER_DIR"}}
         with tempfile.TemporaryDirectory(prefix="cmux-ssh-carrier-pause-") as directory:
             build = Path(directory)
-            for module in ["CmuxCore", "CmuxCloudTui"]:
+            for module in ["CmuxCore", "CmuxCloudTui", "CmuxSurfaceCatalogModel"]:
                 source = build / f"{module}.swift"
                 source.write_text("// Empty dependency for the isolated link host.\n")
                 self.compile(environment, ["-emit-module", "-module-name", module,
@@ -29,12 +29,15 @@ class SSHSharedCarrierPauseTests(unittest.TestCase):
             sources = [ROOT / "Sources/RemoteTui/SSHTuiLinkManager.swift"]
             intent = ROOT / "Sources/RemoteTui/SSHTuiTransportIntent.swift"
             if intent.exists():
-                sources.append(intent)
+                sources.extend([intent,
+                    ROOT / "Sources/Surfaces/CmuxTuiSurfaceProvider+SSHTransport.swift",
+                    ROOT / "tests/fixtures/SSHSharedCarrierProviderFixture.swift"])
             self.compile(environment, ["-parse-as-library", "-I", str(build), "-L", str(build),
                 "-lCmuxCloud", "-Xlinker", "-rpath", "-Xlinker", str(build),
                 *map(str, sources), str(ROOT / "tests/fixtures/SSHSharedCarrierPauseFixture.swift"),
                 "-o", str(build / "probe")])
-            result = subprocess.run([str(build / "probe")], capture_output=True, text=True, env=environment)
+            result = subprocess.run([str(build / "probe")], capture_output=True, text=True,
+                                    env=environment, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def compile(self, environment, arguments):

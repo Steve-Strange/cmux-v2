@@ -77,6 +77,8 @@ final class SSHTuiWorkspaceCoordinator {
     /// The workspace stays `.connecting` while retryable failures back off,
     /// so a relaunch that races network startup does not flash SSH errors.
     func connect(workspace: Workspace, configuration: WorkspaceRemoteConfiguration) {
+        let machine = SurfaceMachineID(rawValue: SSHTuiConnection(configuration: configuration).id)
+        (catalog.provider(for: machine) as? CmuxTuiSurfaceProvider)?.resumeSSHTransport()
         for projection in catalog.projections where projection.workspaceID == workspace.id && projection.resource.machine.isSSH {
             let provider = catalog.provider(for: projection.resource.machine) as? CmuxTuiSurfaceProvider
             _ = provider?.manualMirrorSessions[projection.panelID]?.retryConnection()
@@ -222,10 +224,13 @@ final class SSHTuiWorkspaceCoordinator {
                                      agentHookProviders: { SSHTuiConnection.agentHookProviders(defaults: .standard) })
         let provider = CmuxTuiSurfaceProvider(summary: .ssh(connection), links: links, catalog: catalog)
         catalog.register(provider)
+        provider.pauseSSHTransportIfUnused()
         return provider
     }
 
     func open(workspace: Workspace, configuration: WorkspaceRemoteConfiguration, initialCommand: [String]? = nil, focus: Bool = true) async throws {
+        let machine = SurfaceMachineID(rawValue: SSHTuiConnection(configuration: configuration).id)
+        (catalog.provider(for: machine) as? CmuxTuiSurfaceProvider)?.resumeSSHTransport()
         attempts.removeValue(forKey: workspace.id)?.cancel()
         recoveries.removeValue(forKey: workspace.id)
         let attemptID = UUID()
@@ -259,6 +264,7 @@ final class SSHTuiWorkspaceCoordinator {
 
     private func attachBody(workspace: Workspace, configuration: WorkspaceRemoteConfiguration, attemptID: UUID, initialCommand: [String]?,
                             restoring: Bool, focus: Bool, held: ReservationHold) async throws {
+        try requireCurrent(workspace: workspace, attemptID: attemptID)
         let discardedLegacyDescriptor = configuration.restoredSSHSession != nil
             && Self.configurationForAttach(configuration).restoredSSHSession == nil
         let preparedConfiguration = Self.configurationForAttach(configuration)
@@ -276,6 +282,9 @@ final class SSHTuiWorkspaceCoordinator {
             workspace.cloudVMBinding = nil
         }
         let provider = try provider(connection: connection)
+        // A provider created for a query starts paused. This still-current
+        // workspace attempt explicitly owns its first connection.
+        provider.resumeSSHTransport()
         let machine = provider.machine
         held.reservation = reserveInitialTerminal(workspace: workspace, machine: machine, configuration: configuration, focus: focus)
         if let saved = configuration.restoredSSHSession, saved.sshSessionOwner != "cmux-tui" {
@@ -423,6 +432,12 @@ final class SSHTuiWorkspaceCoordinator {
     }
 
     func disconnect(workspace: Workspace) {
+        var affectedMachines = Set(catalog.projections.compactMap { projection in
+            projection.workspaceID == workspace.id && projection.resource.machine.isSSH ? projection.resource.machine : nil
+        })
+        if let configuration = workspace.remoteConfiguration, workspace.usesSSHTui {
+            affectedMachines.insert(SurfaceMachineID(rawValue: SSHTuiConnection(configuration: configuration).id))
+        }
         workspace.sshTuiConnectionAttemptID = nil
         attempts.removeValue(forKey: workspace.id)?.cancel()
         if recoveries.removeValue(forKey: workspace.id)?.backoff != nil {
@@ -439,9 +454,10 @@ final class SSHTuiWorkspaceCoordinator {
                 provider?.materializedPanels.remove(projection.panelID)
             }
             _ = provider?.manualMirrorSessions[projection.panelID]?.cancelConnectionAttempt()
-            if !ManagedRemoteConnectionsPolicy.isEnabled, let manager = provider?.links as? SSHTuiLinkManager {
-                Task { await manager.disconnect() }
-            }
+        }
+        for machine in affectedMachines {
+            (catalog.provider(for: machine) as? CmuxTuiSurfaceProvider)?
+                .pauseSSHTransportIfUnused(excluding: workspace.id)
         }
     }
 }

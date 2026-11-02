@@ -160,7 +160,13 @@ extension Workspace {
             let previousIntent = remoteConnectionResumeEnabled
             remoteConnectionResumeEnabled = true
             let accepted = session.retryConnection()
-            if !accepted { remoteConnectionResumeEnabled = previousIntent }
+            if accepted,
+               let projection = SurfaceCatalog.shared.projectionIncludingPendingRestore(forPanel: surfaceId),
+               let provider = SurfaceCatalog.shared.provider(for: projection.resource.machine) as? CmuxTuiSurfaceProvider {
+                provider.resumeSSHTransport()
+            } else if !accepted {
+                remoteConnectionResumeEnabled = previousIntent
+            }
             return accepted
         }
         if usesSSHTui, let configuration = remoteConfiguration {
@@ -255,6 +261,7 @@ extension Workspace {
         if retryReservedCloudTerminalPane(surfaceId: surfaceId) { return true }
         if let resource = cloudProjectedResource(forPanel: surfaceId),
            let provider = SurfaceCatalog.shared.provider(for: resource.id.machine) as? CmuxTuiSurfaceProvider {
+            provider.resumeSSHTransport()
             guard let session = provider.manualMirrorSessions[surfaceId] else {
                 clearCloudMaterializationFailure(surfaceID: surfaceId)
                 provider.scheduleRefresh()

@@ -332,7 +332,7 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
     }
     /// One refresh pass. Sleeping machines retain their graph without being woken.
     func performRefresh(force: Bool) async -> Bool {
-        guard !hasLostAccess else { return false }
+        guard !hasLostAccess, !isSSHTransportPaused else { return false }
         let lifecycle = lifecycleGeneration
         guard isCurrentLifecycleGeneration(lifecycle), isRegisteredInCatalog() else { return false }
         refreshGeneration &+= 1

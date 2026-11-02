@@ -33,6 +33,8 @@ extension TerminalController {
         let connection = SSHTuiConnection(configuration: configuration)
         let provider = try coordinator.provider(connection: connection)
         guard let links = provider.links as? SSHTuiLinkManager else { throw CloudDiagnosticFailure.unsupported }
+        let explicitUse = provider.beginExplicitSSHTransportUse()
+        defer { if let explicitUse { provider.endExplicitSSHTransportUse(explicitUse) } }
         await links.adopt(connection)
         do {
             // Like `ssh`, a new route reports OpenSSH's own failure in seconds
