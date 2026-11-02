@@ -87,6 +87,10 @@ jobs:
             -disableAutomaticPackageResolution \
             -resultBundlePath "$PWD/build/personal-macos/test-build.xcresult" \
             'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) CMUX_CI_APP_HOST_ISOLATION_REQUIRED' \
+            SWIFT_ENABLE_BATCH_MODE=NO \
+            DEBUG_INFORMATION_FORMAT= \
+            GCC_GENERATE_DEBUGGING_SYMBOLS=NO \
+            'OTHER_SWIFT_FLAGS=$(inherited) $(CMUX_TEST_SWIFT_FLAGS_$(TARGET_NAME)) -Xllvm -aarch64-enable-global-isel-at-O=-1' \
             CMUX_SKIP_ZIG_BUILD=1 \
             build-for-testing 2>&1 | tee build/personal-macos/test-build.log
           python3 - <<'PY'
