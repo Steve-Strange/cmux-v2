@@ -63,7 +63,7 @@ extension Workspace {
         let baseTitle = panelTitles[panelId] ?? panel.displayTitle
         bonsplitController.updateTab(
             tabId,
-            title: resolvedPanelTitle(panelId: panelId, fallback: baseTitle),
+            title: tabDisplayTitle(panelId: panelId, fallback: baseTitle),
             hasCustomTitle: panelCustomTitles[panelId] != nil
         )
         // A remote tmux mirror tab rename propagates to `rename-window`.

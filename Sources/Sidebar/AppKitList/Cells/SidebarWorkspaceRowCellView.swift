@@ -705,6 +705,7 @@ final class SidebarWorkspaceRowTableCellView: NSTableCellView {
             remoteTargetView.lineBreakMode = .byTruncatingMiddle
             remoteTargetView.toolTip = snapshot.remoteStateHelpText
             remoteStatusView.stringValue = snapshot.remoteConnectionStatusText
+            remoteStatusView.toolTip = snapshot.remoteStateHelpText
             remoteStatusView.font = .systemFont(ofSize: model.scaled(9), weight: .medium)
             remoteStatusView.textColor = palette.secondary(0.58)
             if !remoteReconnectButton.isHidden {

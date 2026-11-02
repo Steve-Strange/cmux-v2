@@ -56,3 +56,12 @@ The helper rejects changed client inputs, uses that immutable manifest, and
 requires the official workflow's attestation and exact source digest. A future
 client or Ghostty change needs a reviewed pin update. CI uses only its read-only
 GitHub token, without developer signing secrets or the gpusp SSH key.
+
+After placing the personal app in a permanent location, enable startup after
+macOS login with `python3 scripts/personal-macos-login.py --enable '<app path>'`.
+This installs a user LaunchAgent and opens the app without launch arguments, so
+normal session restoration runs. It does not keep reopening an app you quit.
+Remove this setting with `python3 scripts/personal-macos-login.py --disable`.
+Saved managed SSH workspaces retry network failures; explicit Disconnect stays
+paused across relaunch until Reconnect is selected. Authentication failures need
+manual attention. Plain SSH typed into a local shell is not a managed workspace.

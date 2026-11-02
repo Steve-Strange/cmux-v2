@@ -261,7 +261,10 @@ struct SidebarWorkspaceSnapshotFactory {
     private var remoteWorkspaceSidebarText: String? {
         guard workspace.isRemoteWorkspace else { return nil }
         let target = workspace.remoteDisplayTarget?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let target, !target.isEmpty { return target }
+        if let target, !target.isEmpty {
+            guard let sessionName = workspace.remoteConfiguration?.terminalProfile.tmuxSessionName else { return target }
+            return [target, sessionName].joined(separator: " · ")
+        }
         return String(localized: "sidebar.remote.subtitleFallback", defaultValue: "Remote workspace")
     }
 
@@ -293,23 +296,28 @@ struct SidebarWorkspaceSnapshotFactory {
     }
 
     private var remoteConnectionStatusText: String {
-        switch workspace.remoteConnectionState {
-        case .connected:
-            return String(localized: "remote.status.connected", defaultValue: "Connected")
-        case .connecting:
-            return String(localized: "remote.status.connecting", defaultValue: "Connecting")
-        case .reconnecting:
-            return String(localized: "remote.status.reconnecting", defaultValue: "Reconnecting")
-        case .error:
-            return String(localized: "remote.status.error", defaultValue: "Error")
-        case .disconnected:
-            return String(localized: "remote.status.disconnected", defaultValue: "Disconnected")
-        case .suspended:
-            return String(localized: "remote.status.suspended", defaultValue: "Unreachable")
-        }
+        workspace.remoteConnectionState.displayLabel
     }
 
     private var remoteStateHelpText: String {
+        let panelId = workspace.focusedPanelId
+        let presentation = TerminalConnectionPresentation(
+            origin: "",
+            title: panelId.flatMap { workspace.panelTitle(panelId: $0) } ?? "",
+            directory: workspace.presentedCurrentDirectory,
+            sessionName: workspace.remoteConfiguration?.terminalProfile.tmuxSessionName
+                ?? workspace.remoteTmuxSessionMirror?.sessionName
+        )
+        var lines = [remoteConnectionHelpSummary] + presentation.detailLines
+        if workspace.remoteConnectionState != .error,
+           let detail = workspace.remoteConnectionDetail?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !detail.isEmpty {
+            lines.append(detail)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var remoteConnectionHelpSummary: String {
         let target = workspace.remoteDisplayTarget ?? String(
             localized: "sidebar.remote.help.targetFallback",
             defaultValue: "remote host"

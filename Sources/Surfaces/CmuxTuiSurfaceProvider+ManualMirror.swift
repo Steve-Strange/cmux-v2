@@ -23,6 +23,7 @@ extension CmuxTuiSurfaceProvider {
         focus: Bool,
         adopting reservation: CloudTerminalPaneReservation? = nil
     ) async throws -> CloudManualMirrorMaterialization {
+        try requireSSHWorkspaceResumeIntent(at: destination)
         try catalog.validateOwnership(of: [resource.id], at: destination)
         let savedPlacement = try reservation?.validatedAttachmentPlacement(
             resourceID: resource.id, remoteTabID: remoteTabID, catalog: catalog
@@ -31,7 +32,10 @@ extension CmuxTuiSurfaceProvider {
         let preferredWorkspaceID = savedPlacement?.workspaceID ?? resource.remoteWorkspace?.id
             ?? catalog.cloudPlacementCoordinator.boundRemoteWorkspaceID(forLocalWorkspace: destination.workspaceID, on: machine)
         let connected = try await links.connected(machineID: machineID)
-        guard let link = await links.link(machineID: machineID) else {
+        try requireSSHWorkspaceResumeIntent(at: destination)
+        let availableLink = await links.link(machineID: machineID)
+        try requireSSHWorkspaceResumeIntent(at: destination)
+        guard let link = availableLink else {
             throw ProviderError.machineAsleep(machineID)
         }
         let correlationID = UUID().uuidString.lowercased()
@@ -55,6 +59,7 @@ extension CmuxTuiSurfaceProvider {
                 preferredWorkspaceID: preferredWorkspaceID
             )
         }
+        try requireSSHWorkspaceResumeIntent(at: destination)
         let knownPlacement = remoteTabID.flatMap { tabID in
             resource.remoteViews?.first(where: { $0.tabID == tabID })
                 .map { SurfaceRemotePlacement(workspaceID: $0.workspace.id, tabID: $0.tabID) }
@@ -157,6 +162,16 @@ extension CmuxTuiSurfaceProvider {
             session.stop()
             throw error
         }
+    }
+
+    /// A suspended carrier must not attach a pane after its workspace was paused.
+    private func requireSSHWorkspaceResumeIntent(at destination: SurfaceDestination) throws {
+        try Task.checkCancellation()
+        guard machine.isSSH,
+              let workspace = catalog.cloudWorkspaceRenameService.environment.workspace(destination.workspaceID)
+                ?? Workspace.liveWorkspace(id: destination.workspaceID),
+              workspace.usesSSHTui else { return }
+        guard workspace.remoteConnectionResumeEnabled else { throw CancellationError() }
     }
 
     /// Registers a new pane's attach stream while the machine creates its
@@ -332,15 +347,27 @@ extension CmuxTuiSurfaceProvider {
         restoredAttachTasks[panelID]?.cancel()
         let generation = lifecycleGeneration
         reservation.retry = { [weak self] in
-            guard let self else { return }
-            self.restoredAttachTasks[panelID]?.cancel()
-            Workspace.liveWorkspace(id: reservation.workspaceID)?.restartReservedCloudTerminalPane(reservation)
+            guard let self, let workspace = Workspace.liveWorkspace(id: reservation.workspaceID) else { return }
+            self.restoredAttachTasks.removeValue(forKey: panelID)?.cancel()
+            self.materializedPanels.remove(panelID)
+            workspace.restartReservedCloudTerminalPane(reservation)
+            if self.machine.isSSH, workspace.usesSSHTui {
+                _ = workspace.reconnectRemoteConnection()
+                return
+            }
             self.attachReservedTerminalPane(reservation, resource: resource, remoteTabID: remoteTabID)
         }
         reservation.cancel = { [weak self] in
             guard let self else { return }
             self.restoredAttachTasks.removeValue(forKey: panelID)?.cancel()
             self.materializedPanels.remove(panelID)
+        }
+        do {
+            try requireSSHWorkspaceResumeIntent(at: .workspace(id: reservation.workspaceID, placement: .tab))
+        } catch {
+            restoredAttachTasks[panelID] = nil
+            materializedPanels.remove(panelID)
+            return
         }
         if Self.shouldShowRecoverableCloudFailure(
             observation: catalog.cloudStateObservations[machine] ?? .stale(reason: "missing")
@@ -366,6 +393,7 @@ extension CmuxTuiSurfaceProvider {
                     index: nil
                 )
                 do {
+                    try self.requireSSHWorkspaceResumeIntent(at: destination)
                     let materialized = try await self.materializeManualMirrorTerminal(
                         resource,
                         remoteTabID: remoteTabID,
@@ -373,6 +401,12 @@ extension CmuxTuiSurfaceProvider {
                         focus: false,
                         adopting: reservation
                     )
+                    do {
+                        try self.requireSSHWorkspaceResumeIntent(at: destination)
+                    } catch {
+                        self.manualMirrorSessions.removeValue(forKey: materialized.panelID)?.stop()
+                        throw error
+                    }
                     guard !Task.isCancelled, self.isCurrentLifecycleGeneration(generation) else {
                         self.manualMirrorSessions.removeValue(forKey: materialized.panelID)?.stop()
                         return
@@ -397,6 +431,10 @@ extension CmuxTuiSurfaceProvider {
                     self.restoredAttachTasks[panelID] = nil
                     return
                 } catch is CancellationError {
+                    if self.machine.isSSH, workspace.usesSSHTui, !workspace.remoteConnectionResumeEnabled {
+                        self.restoredAttachTasks[panelID] = nil
+                        self.materializedPanels.remove(panelID)
+                    }
                     return
                 } catch {
                     guard !Task.isCancelled else { return }

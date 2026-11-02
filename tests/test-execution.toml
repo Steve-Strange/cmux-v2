@@ -1774,3 +1774,15 @@ lane = "linux-guard"
 [[test]]
 path = "tests/test_ci_frame_pacing_dispatch.py"
 lane = "linux-guard"
+
+[[test]]
+path = "tests/test_sidebar_remote_status_refresh.py"
+lane = "linux-guard"
+
+[[test]]
+path = "tests/test_ssh_attachment_reconnect_intent.py"
+lane = "linux-guard"
+
+[[test]]
+path = "tests/test_terminal_connection_presentation.py"
+lane = "linux-guard"

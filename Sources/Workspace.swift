@@ -204,7 +204,7 @@ extension Workspace {
             logEntries: logSnapshots,
             progress: progressSnapshot,
             gitBranch: gitBranchSnapshot,
-            remote: remoteConfiguration?.sessionSnapshot(),
+            remote: remoteSessionSnapshot(),
             cloudVM: cloudVMBinding.map {
                 SessionCloudVMBindingSnapshot(vmID: $0.vmID, isBase: $0.isBase, remoteWorkspaceID: $0.remoteWorkspaceID, teamID: $0.teamID)
             },
@@ -284,7 +284,7 @@ extension Workspace {
             localSocketPath: TerminalController.shared.currentSocketPathForRemoteRestore()
         )
         if let restoredRemoteConfiguration {
-            let shouldAutoConnect = sessionRestorePolicy.shouldAutoConnectRestoredRemote(
+            let shouldAutoConnect = snapshot.remote?.autoReconnect != false && sessionRestorePolicy.shouldAutoConnectRestoredRemote(
                 foregroundAuthToken: restoredRemoteConfiguration.foregroundAuthToken,
                 snapshot: snapshot
             )
@@ -292,8 +292,10 @@ extension Workspace {
                 restoredRemoteConfiguration,
                 autoConnect: shouldAutoConnect
             )
+            remoteConnectionResumeEnabled = snapshot.remote?.autoReconnect != false
         } else {
-            disconnectRemoteConnection(clearConfiguration: true)
+            disconnectRemoteConnection(clearConfiguration: true, preserveReconnectIntent: true)
+            remoteConnectionResumeEnabled = true
         }
         // The binding survives restore so the machine's workspace is found again; its pane's
         // link was a process and is not reconnected here (a fresh open re-attaches).
@@ -1597,6 +1599,10 @@ extension Workspace {
                inPane: paneId
            ) {
             return restoredCloudPanelID }
+        if !remoteConnectionResumeEnabled, remoteConfiguration != nil, snapshot.type == .terminal,
+           snapshot.terminal?.isRemoteTerminal != false {
+            return restoreDisconnectedRemotePanel(snapshot, inPane: paneId)
+        }
         if usesSSHTui, remoteConfiguration?.preserveAfterTerminalExit == true, snapshot.type == .terminal {
             return restoreDeviceDisplayPanel(snapshot, in: paneId)
         }
@@ -2400,7 +2406,7 @@ extension Workspace {
         if let panel = panels[panelId], let tabId = surfaceIdFromPanelId(panelId) {
             bonsplitController.updateTab(
                 tabId,
-                title: resolvedPanelTitle(panelId: panelId, fallback: panelTitles[panelId] ?? panel.displayTitle),
+                title: tabDisplayTitle(panelId: panelId, fallback: panelTitles[panelId] ?? panel.displayTitle),
                 hasCustomTitle: panelCustomTitles[panelId] != nil
             )
         }
@@ -3239,8 +3245,21 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
     }
     @Published var surfaceListeningPorts: [UUID: [Int]] = [:]
     var agentListeningPorts: [Int] = []
+    /// User intent survives network loss and app relaunch independently of live state.
+    var remoteConnectionResumeEnabled = true
+
+    func remoteSessionSnapshot() -> SessionRemoteWorkspaceSnapshot? {
+        guard var snapshot = remoteConfiguration?.sessionSnapshot() else { return nil }
+        snapshot.autoReconnect = remoteConnectionResumeEnabled ? nil : false
+        return snapshot
+    }
+
     @Published var remoteConfiguration: WorkspaceRemoteConfiguration? {
         didSet {
+            if oldValue?.displayTarget != remoteConfiguration?.displayTarget
+                || oldValue?.terminalProfile != remoteConfiguration?.terminalProfile {
+                refreshTerminalConnectionTitles()
+            }
             // Window titles append the host (`hostLabel`); refresh them only when
             // an input of that label changed, not on every lease or relay update.
             guard oldValue?.destination != remoteConfiguration?.destination
@@ -3279,7 +3298,11 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
     }
     /// The workspace-owned state for the latest failed cloud terminal creation request.
     @MainActor let cloudPaneCreationFailureStore = CloudPaneCreationFailureStore()
-    @Published var remoteConnectionState: WorkspaceRemoteConnectionState = .disconnected
+    @Published var remoteConnectionState: WorkspaceRemoteConnectionState = .disconnected {
+        didSet {
+            if oldValue != remoteConnectionState { refreshTerminalConnectionTitles() }
+        }
+    }
     @Published var remoteConnectionDetail: String?
     // Unsuppressed controller truth retained while live terminal liveness
     // temporarily owns the published presentation above.
@@ -3320,10 +3343,18 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
             // machine its shell runs on, so predicted echo classifies it again.
             for surfaceID in activeRemoteTerminalSurfaceIds.symmetricDifference(oldValue) {
                 TerminalPredictionCenter.shared.surfaceMachineMayHaveChanged(surfaceID: surfaceID)
+                refreshTerminalConnectionTitle(panelId: surfaceID)
             }
         }
     }
-    var remoteTerminalSessionStatesBySurfaceId: [UUID: WorkspaceRemoteTerminalSessionState] = [:]
+    var remoteTerminalSessionStatesBySurfaceId: [UUID: WorkspaceRemoteTerminalSessionState] = [:] {
+        didSet {
+            for panelId in Set(oldValue.keys).union(remoteTerminalSessionStatesBySurfaceId.keys)
+            where oldValue[panelId] != remoteTerminalSessionStatesBySurfaceId[panelId] {
+                refreshTerminalConnectionTitle(panelId: panelId)
+            }
+        }
+    }
     var pendingRemoteTerminalConnectionsBySurfaceId: [UUID: PendingWorkspaceRemoteTerminalConnection] = [:]
     var remoteTerminalAttemptIDsBySurfaceId: [UUID: UUID] = [:]
     var endedRemoteTerminalLifecycleIDsBySurfaceId: [UUID: UUID] = [:]
@@ -3374,12 +3405,24 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
     /// Remote disconnect metadata follows the surface whose process ended.
     var pendingRemoteDisconnectReplacementsBySurfaceId: [UUID: PendingRemoteDisconnectReplacement] = [:]
     let remoteDisconnectPreparationService = RemoteDisconnectPreparationService()
-    var remoteDisconnectPlaceholderPanelIds: Set<UUID> = []
+    var remoteDisconnectPlaceholderPanelIds: Set<UUID> = [] {
+        didSet {
+            for panelId in oldValue.symmetricDifference(remoteDisconnectPlaceholderPanelIds) {
+                refreshTerminalConnectionTitle(panelId: panelId)
+            }
+        }
+    }
     /// A restored Cloud terminal can fail before its mirror session exists.
     /// Keep that failure on the placeholder panel so it cannot remain blank.
     var cloudMaterializationFailures: [UUID: (detail: String, reference: String?)] = [:]
     /// Optimistic Cloud panes whose terminal the machine is still creating, by panel id.
-    var cloudPendingCreations: [UUID: CloudTerminalPaneReservation] = [:]
+    var cloudPendingCreations: [UUID: CloudTerminalPaneReservation] = [:] {
+        didSet {
+            for panelId in Set(oldValue.keys).union(cloudPendingCreations.keys) {
+                refreshTerminalConnectionTitle(panelId: panelId)
+            }
+        }
+    }
     /// Cloud browser panes waiting for the daemon's committed browser path.
     var cloudBrowserCreationTasks: [UUID: Task<Void, Never>] = [:]
     var pendingCloudBrowserPanelIDs: Set<UUID> = []
@@ -4434,7 +4477,7 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
 
             // Create initial tab in bonsplit and store the mapping
             if let tabId = bonsplitController.createTab(
-                title: admittedAutomaticTitle,
+                title: tabDisplayTitle(panelId: terminalPanel.id, fallback: admittedAutomaticTitle),
                 icon: "terminal.fill",
                 kind: SurfaceKind.terminal.rawValue,
                 isDirty: false,
@@ -5694,7 +5737,7 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         _ = applyFocusedPanelTitle(panelId: panelId)
         guard let tabId = surfaceIdFromPanelId(panelId) else { return }
         let baseTitle = panelTitles[panelId] ?? panel.displayTitle
-        bonsplitController.updateTab(tabId, title: resolvedPanelTitle(panelId: panelId, fallback: baseTitle))
+        bonsplitController.updateTab(tabId, title: tabDisplayTitle(panelId: panelId, fallback: baseTitle))
     }
 
     private func syncPinnedStateForTab(_ tabId: TabID, panelId: UUID) {
@@ -6263,6 +6306,9 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         }
         if usesRemoteDirectoryProvenance {
             notifyPresentedCurrentDirectoryChanged(from: previousPresentedDirectory, force: provenanceChanged)
+        }
+        if remoteConfiguration?.transport == .ssh, directoryChanged || provenanceChanged {
+            refreshTerminalConnectionTitle(panelId: panelId)
         }
         return true
     }
@@ -7354,6 +7400,7 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         // command palette, menus, forks, session restore, and automation at
         // once. Nothing is retained or dialed before the refusal.
         guard !managedDevicePolicy.isEnforced(.disableRemoteConnections) else { return false }
+        remoteConnectionResumeEnabled = true
         if let managedCloudVMID = configuration.managedCloudVMID,
            !managedCloudVMID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            !CloudMachinesFeature.offMainIsEnabled() {
@@ -7523,7 +7570,12 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         return true
     }
 
-    func disconnectRemoteConnection(clearConfiguration: Bool = false, disconnectedDetail: String? = nil) {
+    func disconnectRemoteConnection(
+        clearConfiguration: Bool = false,
+        disconnectedDetail: String? = nil,
+        preserveReconnectIntent: Bool = false
+    ) {
+        if !preserveReconnectIntent, remoteConfiguration != nil { remoteConnectionResumeEnabled = false }
         AppDelegate.shared?.sshTuiWorkspaceCoordinator.disconnect(workspace: self)
         defer { TerminalController.shared.notifyRemotePTYControllerAvailabilityChanged() }
         let previousPresentedDirectory = presentedCurrentDirectory
@@ -8033,6 +8085,7 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
     func postRemoteConnectionPresentationDidChange() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            self.refreshTerminalConnectionTitles()
             NotificationCenter.default.post(
                 name: .workspaceRemoteConnectionPresentationDidChange,
                 object: self
@@ -8334,7 +8387,8 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
             disconnectedDetail: String(
                 localized: "remote.status.terminalDisconnected",
                 defaultValue: "Remote terminal session disconnected"
-            )
+            ),
+            preserveReconnectIntent: true
         )
     }
 
@@ -9448,7 +9502,7 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         // Pre-generate the bonsplit tab ID so we can install the panel mapping before bonsplit
         // mutates layout state (avoids transient "Empty Panel" flashes during split).
         let newTab = Bonsplit.Tab(
-            title: newPanel.displayTitle,
+            title: tabDisplayTitle(panelId: newPanel.id, fallback: newPanel.displayTitle),
             icon: newPanel.displayIcon,
             kind: SurfaceKind.terminal.rawValue,
             isDirty: newPanel.isDirty,
@@ -9785,7 +9839,7 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         }
         // Create tab in bonsplit
         guard let newTabId = bonsplitController.createTab(
-            title: newPanel.displayTitle,
+            title: tabDisplayTitle(panelId: newPanel.id, fallback: newPanel.displayTitle),
             icon: newPanel.displayIcon,
             kind: SurfaceKind.terminal.rawValue,
             isDirty: newPanel.isDirty,
@@ -12407,7 +12461,7 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
 
         // Create tab in bonsplit
         if let newTabId = bonsplitController.createTab(
-            title: newPanel.displayTitle,
+            title: tabDisplayTitle(panelId: newPanel.id, fallback: newPanel.displayTitle),
             icon: newPanel.displayIcon,
             kind: SurfaceKind.terminal.rawValue,
             isDirty: newPanel.isDirty,
@@ -13618,7 +13672,7 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         }
 
         let newTab = Bonsplit.Tab(
-            title: newPanel.displayTitle,
+            title: tabDisplayTitle(panelId: newPanel.id, fallback: newPanel.displayTitle),
             icon: newPanel.displayIcon,
             kind: SurfaceKind.terminal.rawValue,
             isDirty: newPanel.isDirty,
@@ -15242,7 +15296,7 @@ extension Workspace: BonsplitDelegate {
         panelTitles[newPanel.id] = newPanel.displayTitle
 
         guard let newTabId = bonsplitController.createTab(
-            title: newPanel.displayTitle,
+            title: tabDisplayTitle(panelId: newPanel.id, fallback: newPanel.displayTitle),
             icon: newPanel.displayIcon,
             kind: SurfaceKind.terminal.rawValue,
             isDirty: newPanel.isDirty,

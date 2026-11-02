@@ -53,13 +53,19 @@ jobs:
           key: personal-macos-${{ runner.arch }}-${{ hashFiles('Native/**/Cargo.lock', 'scripts/personal-macos-client.json') }}
           restore-keys: personal-macos-${{ runner.arch }}-
       - name: Test SSH reconnection policy
-        run: swift test --package-path Packages/macOS/CmuxRemoteSession --filter 'PersistentSSHReconnectTests|RemoteReconnectPolicyTests'
+        run: |
+          set -euo pipefail
+          mkdir -p build/personal-macos
+          swift test --package-path Packages/macOS/CmuxRemoteSession --filter 'PersistentSSHReconnectTests|RemoteReconnectPolicyTests' 2>&1 | tee build/personal-macos/remote-session-tests.log
       - name: Test remote workspace persistence
-        run: swift test --package-path Packages/macOS/CmuxCore --filter SessionRemoteWorkspaceSnapshotTests
+        run: |
+          set -euo pipefail
+          swift test --package-path Packages/macOS/CmuxCore --filter SessionRemoteWorkspaceSnapshotTests 2>&1 | tee build/personal-macos/snapshot-tests.log
       - name: Test connection labels and sidebar updates
         run: |
           python3 tests/test_terminal_connection_presentation.py
           python3 tests/test_sidebar_remote_status_refresh.py
+          python3 tests/test_ssh_attachment_reconnect_intent.py
       - name: Build and archive personal app
         run: ./scripts/personal-macos-build.sh --tag steve-ssh
       - name: Compile native regression test target
@@ -102,7 +108,7 @@ jobs:
           print(candidates[0])
           PY
           )"
-          for suite in RemoteWorkspaceReconnectIntentTests SSHTuiAttachRetryTests RemoteDisconnectLifecycleTests SidebarWorkspaceSnapshotRefreshPolicyTests; do
+          for suite in RemoteWorkspaceReconnectIntentTests SSHTuiAttachRetryTests RemoteDisconnectLifecycleTests SidebarWorkspaceSnapshotRefreshPolicyTests CloudStaleInventoryMaterializationTests; do
             log="build/personal-macos/$suite.log"
             scripts/ci/run-in-console-session.sh \
               scripts/ci/run-app-host-xcodebuild.sh \
@@ -128,6 +134,7 @@ jobs:
           receipt["appHostTestSuites"] = [
               "RemoteWorkspaceReconnectIntentTests", "SSHTuiAttachRetryTests",
               "RemoteDisconnectLifecycleTests", "SidebarWorkspaceSnapshotRefreshPolicyTests",
+              "CloudStaleInventoryMaterializationTests",
           ]
           path.write_text(json.dumps(receipt, indent=2) + "\n")
           PY

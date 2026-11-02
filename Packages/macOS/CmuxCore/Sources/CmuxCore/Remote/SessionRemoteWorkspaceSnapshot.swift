@@ -9,6 +9,10 @@ public struct SessionRemoteWorkspaceSnapshot: Codable, Equatable, Sendable {
     /// Explicit persistent SSH owner; absent in legacy daemon snapshots.
     public var sshSessionOwner: String? = nil
 
+    /// Whether restore may reconnect this workspace. Missing legacy values allow
+    /// reconnect; `false` preserves an explicit user disconnect across launches.
+    public var autoReconnect: Bool? = nil
+
     /// The transport the workspace used when the snapshot was taken.
     public var transport: WorkspaceRemoteTransport
     /// The interactive terminal protocol, absent in snapshots written before Mosh support.
@@ -50,6 +54,7 @@ public struct SessionRemoteWorkspaceSnapshot: Codable, Equatable, Sendable {
         terminalProfile: WorkspaceRemoteTerminalProfile? = nil,
         configuredRemoteCommand: String? = nil,
         destination: String,
+        autoReconnect: Bool? = nil,
         port: Int? = nil,
         identityFile: String? = nil,
         sshOptions: [String] = [],
@@ -66,6 +71,7 @@ public struct SessionRemoteWorkspaceSnapshot: Codable, Equatable, Sendable {
         self.terminalProfile = terminalProfile
         self.configuredRemoteCommand = configuredRemoteCommand
         self.destination = destination
+        self.autoReconnect = autoReconnect
         self.port = port
         self.identityFile = identityFile
         self.sshOptions = sshOptions

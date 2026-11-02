@@ -137,7 +137,7 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
     var manualMirrorSurfaceIDsSocketPath: String?
     /// Arms the next attachment pass after one that could not resolve every
     /// open pane; reset by a fully resolved pass.
-    let attachmentRetry = CloudTerminalAttachmentRetryScheduler()
+    let attachmentRetry: CloudTerminalAttachmentRetryScheduler
     let attachmentLog = CloudTerminalAttachmentLog()
     /// Drives the bounded backoff between resolver attempts of one open.
     let attachmentClock: any Clock<Duration>
@@ -187,6 +187,7 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
         self.ownerTeamID = ownerTeamID
         machineID = summary.id
         self.attachmentClock = attachmentClock
+        self.attachmentRetry = CloudTerminalAttachmentRetryScheduler(clock: attachmentClock)
         self.summary = summary
         self.links = links
         self.catalog = catalog
@@ -496,6 +497,19 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
                 // Retrying cannot succeed; a retry loop would only keep a frozen pane.
                 noteAccessLost(loss)
                 return false
+            }
+            if machine.isSSH {
+                if SSHTuiAttachRetryPolicy.requiresManualAuthentication(error) {
+                    attachmentRetry.cancel()
+                    for session in manualMirrorSessions.values {
+                        _ = session.cancelConnectionAttempt()
+                    }
+                } else if !SSHTuiAttachRetryPolicy.isPermanent(error),
+                          manualMirrorSessions.values.contains(where: \.allowsAutomaticReconnect) {
+                    // A dropped carrier cannot publish a link-up event. Keep one bounded
+                    // retry owner alive until the network returns or the user disconnects.
+                    scheduleAttachmentRetry()
+                }
             }
             portDiscovery.linkFailed()
             let status = await links.status(machineID: machineID)
@@ -1825,6 +1839,7 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
             for projection in (resourceIDs == nil ? catalog.projections(of: terminal.id) : projectionsByResource?[terminal.id] ?? []) where !materializedPanels.contains(projection.panelID) {
                 guard cloudState.map({ catalog.cloudWorkspaceProjectionCoordinator.retainsProjection(projection, in: $0, catalog: catalog) }) != false,
                       let workspace = AppDelegate.shared?.workspace(containingSurfaceID: projection.panelID),
+                      !machine.isSSH || !workspace.usesSSHTui || workspace.remoteConnectionResumeEnabled,
                       let paneID = SurfacePaneFactory.paneID(ofPanel: projection.panelID, in: projection.workspaceID) else {
                     continue
                 }

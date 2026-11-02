@@ -1,7 +1,39 @@
+import Bonsplit
+import CmuxFoundation
 import CmuxTerminal
 import Foundation
 
 extension Workspace {
+    /// Restores a user-disconnected terminal without executing its remote command or agent.
+    func restoreDisconnectedRemotePanel(_ snapshot: SessionPanelSnapshot, inPane paneId: PaneID) -> UUID? {
+        if usesSSHTui { return restoreDeviceDisplayPanel(snapshot, in: paneId) }
+        guard let configuration = remoteConfiguration else { return nil }
+        let sessionID = normalizedRemotePTYSessionID(snapshot.terminal?.remotePTYSessionID)
+        let reconnectCommand = sessionID.map {
+            remotePTYAttachStartupCommand(sessionID: $0, remoteCommand: configuration.configuredRemoteCommand)
+        } ?? effectiveRemoteTerminalStartupCommand(from: configuration)
+        guard let script = Self.remoteDisconnectPlaceholderScript(
+            target: configuration.displayTarget,
+            reconnectCommand: reconnectCommand
+        ) else { return nil }
+        guard let panel = newTerminalSurface(
+            inPane: paneId,
+            focus: false,
+            initialCommand: "/bin/sh \(script.posixShellWord)",
+            remotePTYSessionID: sessionID,
+            suppressWorkspaceRemoteStartupCommand: true,
+            restoredSurfaceId: GhosttyApp.terminalSurfaceRegistry.surface(id: snapshot.id) == nil ? snapshot.id : UUID(),
+            terminalFontSizeCreationPolicy: .sessionRestore(
+                overrideBasePoints: snapshot.terminal?.fontSize,
+                representedChangeTokens: Set(snapshot.terminal?.fontSizeChangeTokens ?? [])
+            ),
+            inheritStartupWork: false
+        ) else { return nil }
+        remoteDisconnectPlaceholderPanelIds.insert(panel.id)
+        applySessionPanelMetadata(snapshot, toPanelId: panel.id)
+        return panel.id
+    }
+
     /// Starts one token-checked remote disconnect transaction per surface.
     @discardableResult
     func transitionRemoteTerminalToDisconnectedPlaceholder(

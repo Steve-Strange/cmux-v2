@@ -8,6 +8,11 @@ extension SidebarWorkspaceSnapshotBuilder.Snapshot {
         let isMuted: Bool
         let cloudWorkspaceLabel: String?
         let deviceWorkspaceLabel: String?
+        let remoteWorkspaceSidebarText: String?
+        let remoteConnectionStatusText: String
+        let remoteStateHelpText: String
+        let showsRemoteReconnectAffordance: Bool
+        let copyableSidebarSSHError: String?
         let customColorHex: String?
         let hasManualCustomColor: Bool
         let finderDirectoryPath: String?
@@ -33,6 +38,11 @@ extension SidebarWorkspaceSnapshotBuilder.Snapshot {
             isMuted: isMuted,
             cloudWorkspaceLabel: cloudWorkspaceLabel,
             deviceWorkspaceLabel: deviceWorkspaceLabel,
+            remoteWorkspaceSidebarText: remoteWorkspaceSidebarText,
+            remoteConnectionStatusText: remoteConnectionStatusText,
+            remoteStateHelpText: remoteStateHelpText,
+            showsRemoteReconnectAffordance: showsRemoteReconnectAffordance,
+            copyableSidebarSSHError: copyableSidebarSSHError,
             customColorHex: customColorHex,
             hasManualCustomColor: hasManualCustomColor,
             finderDirectoryPath: finderDirectoryPath,
@@ -62,11 +72,13 @@ extension SidebarWorkspaceSnapshotBuilder.Snapshot {
             customColorHex: snapshot.customColorHex,
             hasManualCustomColor: snapshot.hasManualCustomColor,
             cloudWorkspaceLabel: snapshot.cloudWorkspaceLabel,
-            remoteWorkspaceSidebarText: remoteWorkspaceSidebarText,
-            remoteConnectionStatusText: remoteConnectionStatusText,
-            remoteStateHelpText: remoteStateHelpText,
-            showsRemoteReconnectAffordance: showsRemoteReconnectAffordance,
-            copyableSidebarSSHError: copyableSidebarSSHError,
+            // Connection identity and liveness are not noisy telemetry. A
+            // disconnect must stay truthful while the user chooses an action.
+            remoteWorkspaceSidebarText: snapshot.remoteWorkspaceSidebarText,
+            remoteConnectionStatusText: snapshot.remoteConnectionStatusText,
+            remoteStateHelpText: snapshot.remoteStateHelpText,
+            showsRemoteReconnectAffordance: snapshot.showsRemoteReconnectAffordance,
+            copyableSidebarSSHError: snapshot.copyableSidebarSSHError,
             latestConversationMessage: latestConversationMessage,
             metadataEntries: metadataEntries,
             metadataBlocks: metadataBlocks,

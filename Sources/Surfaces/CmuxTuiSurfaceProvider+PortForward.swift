@@ -416,6 +416,11 @@ extension CmuxTuiSurfaceProvider {
             for projection in (resourceIDs == nil ? catalog.projections(of: resource.id) : projectionsByResource?[resource.id] ?? []) where !materializedPanels.contains(projection.panelID) {
                 guard let browser = SurfacePaneFactory.browserPanel(panelID: projection.panelID, in: projection.workspaceID),
                       isCurrentLifecycleGeneration(generation), catalog.canRestoreProjection(projection) else { continue }
+                if machine.isSSH,
+                   let workspace = AppDelegate.shared?.workspace(containingSurfaceID: projection.panelID),
+                   workspace.usesSSHTui, !workspace.remoteConnectionResumeEnabled {
+                    continue
+                }
                 if let loopbackURL = cloudLoopbackBrowserURL(for: resource) {
                     let configured = configureBrowser(browser, url: browser.cloudRestoreURL(on: loopbackURL), resourceID: resource.id)
                     if configured {

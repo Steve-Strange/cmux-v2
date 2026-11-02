@@ -31,7 +31,12 @@ extension Workspace {
         panel.deviceAttachment = status
         status.onChange = { [weak self] in self?.postRemoteConnectionPresentationDidChange() }
         status.onRetry = { [weak self] in
-            guard self != nil, let projection = SurfaceCatalog.shared.projection(forPanel: panelID),
+            guard let self else { return }
+            if self.usesSSHTui {
+                _ = self.reconnectRemoteConnection()
+                return
+            }
+            guard let projection = SurfaceCatalog.shared.projection(forPanel: panelID),
                   let provider = SurfaceCatalog.shared.provider(for: projection.resource.machine) else { return }
             Task { await provider.refresh(force: true) }
         }
@@ -178,7 +183,7 @@ extension Workspace {
         panels[panel.id] = panel
         panelTitles[panel.id] = Self.cloudManualMirrorTabTitle
         guard let tab = bonsplitController.createTab(
-            title: Self.cloudManualMirrorTabTitle,
+            title: tabDisplayTitle(panelId: panel.id, fallback: Self.cloudManualMirrorTabTitle),
             icon: panel.displayIcon,
             iconAsset: iconAssetName,
             kind: SurfaceKind.terminal.rawValue,
@@ -230,7 +235,7 @@ extension Workspace {
         panels[panel.id] = panel
         panelTitles[panel.id] = Self.cloudManualMirrorTabTitle
         let tab = Bonsplit.Tab(
-            title: Self.cloudManualMirrorTabTitle,
+            title: tabDisplayTitle(panelId: panel.id, fallback: Self.cloudManualMirrorTabTitle),
             icon: panel.displayIcon,
             iconAsset: iconAssetName,
             kind: SurfaceKind.terminal.rawValue,

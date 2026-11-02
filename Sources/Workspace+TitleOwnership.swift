@@ -205,7 +205,7 @@ extension Workspace {
         guard !isRemoteTmuxMirror,
               let tabId = surfaceIdFromPanelId(panelId),
               let existing = bonsplitController.tab(tabId) else { return false }
-        let resolvedTitle = resolvedPanelTitle(panelId: panelId, fallback: displayTitle)
+        let resolvedTitle = tabDisplayTitle(panelId: panelId, fallback: displayTitle)
         let titleUpdate: String? = existing.title == resolvedTitle ? nil : resolvedTitle
         let hasCustomTitle = panelCustomTitles[panelId] != nil
         guard titleUpdate != nil || existing.hasCustomTitle != hasCustomTitle else { return false }

@@ -156,11 +156,18 @@ extension Workspace {
     func reconnectRemoteConnection(surfaceId: UUID? = nil) -> Bool {
         guard !managedDevicePolicy.isEnforced(.disableRemoteConnections) else { return false }
         if isManagedCloudVMWorkspace, !CloudMachinesFeature.offMainIsEnabled() { return false }
-        if let surfaceId, let session = tuiMirrorSession(for: surfaceId) { return session.retryConnection() }
+        if let surfaceId, let session = tuiMirrorSession(for: surfaceId) {
+            let previousIntent = remoteConnectionResumeEnabled
+            remoteConnectionResumeEnabled = true
+            let accepted = session.retryConnection()
+            if !accepted { remoteConnectionResumeEnabled = previousIntent }
+            return accepted
+        }
         if usesSSHTui, let configuration = remoteConfiguration {
             // A targeted pane reconnect cannot escalate into retrying every SSH viewer.
-            guard surfaceId == nil else { return false }
-            AppDelegate.shared?.sshTuiWorkspaceCoordinator.connect(workspace: self, configuration: configuration)
+            guard surfaceId == nil, let coordinator = AppDelegate.shared?.sshTuiWorkspaceCoordinator else { return false }
+            remoteConnectionResumeEnabled = true
+            coordinator.connect(workspace: self, configuration: configuration)
             return true
         }
         // `DisableRemoteConnections` (MDM): a configuration retained from
@@ -181,6 +188,7 @@ extension Workspace {
         } else {
             reconnectingSurfaceId = remoteReconnectTerminalSurfaceId(requestedSurfaceId: nil)
         }
+        remoteConnectionResumeEnabled = true
         if configuration.preserveAfterTerminalExit {
             if remoteControllerIsReady {
                 let reattached = reattachPersistentRemotePTYPanels(requestedSurfaceId: surfaceId, restartEndedSessions: true)
@@ -232,6 +240,15 @@ extension Workspace {
         if let status = terminalPanel(for: surfaceId)?.deviceAttachment {
             status.retry()
             return true
+        }
+        if usesSSHTui, panels[surfaceId] is TerminalPanel {
+            if tuiMirrorSession(for: surfaceId) != nil {
+                return reconnectRemoteConnection(surfaceId: surfaceId)
+            }
+            if retryReservedCloudTerminalPane(surfaceId: surfaceId) { return true }
+            if SurfaceCatalog.shared.projectionIncludingPendingRestore(forPanel: surfaceId)?.resource.machine.isSSH == true {
+                return reconnectRemoteConnection()
+            }
         }
         guard !managedDevicePolicy.isEnforced(.disableRemoteConnections), CloudMachinesFeature.offMainIsEnabled() else { return false }
         // An optimistic pane whose creation failed replays its own request.
