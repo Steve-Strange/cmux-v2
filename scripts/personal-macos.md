@@ -26,6 +26,17 @@ Open action or Privacy & Security's Open Anyway for this build. Cloud login and
 services require a separately running local backend. SSH connections use your
 normal SSH configuration. Remote sessions need tmux to preserve running jobs.
 
+Before archiving, the helper removes build-machine paths and development auth
+overrides, sets socket access to `cmuxOnly`, and signs the enclosing app again
+without changing its entitlements or nested helper signatures. CLI and shell
+integration paths are resolved from the installed bundle. The receipt records
+these checks. Managed connections opened by `cmux ssh` or `workspace.ssh.open`
+use the verified bundled cmux-tui payload. The separate `ssh-tmux` control-mode
+mirror is excluded from upstream session snapshots and is not the automatic
+restoration path. This personal build does not embed the legacy `cmuxd-remote` release
+manifest; that older connection path cannot compile a daemon from the builder's
+source checkout after installation.
+
 The build uses the upstream CI setting `CMUX_SKIP_ZIG_BUILD=1`. Terminal rendering
 uses the verified GhosttyKit framework; the separate Ghostty command helper is
 a stub in this build. The computer-use helper and other native Rust components

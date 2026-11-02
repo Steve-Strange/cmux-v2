@@ -73,7 +73,7 @@ BUILD_LOG="$OUTPUT_DIR/build.log"
 ZIP_PATH="$OUTPUT_DIR/cmux-$BUILD_TAG.zip"
 # Remove only this helper's prior published outputs so a failed rebuild cannot
 # leave a previous app next to the new build log.
-rm -f "$ZIP_PATH" "$ZIP_PATH.sha256" "$OUTPUT_DIR/build-receipt.json"
+rm -f "$ZIP_PATH" "$ZIP_PATH.sha256" "$OUTPUT_DIR/build-receipt.json" "$OUTPUT_DIR/portable-bundle.json"
 DERIVED_DATA="${CMUX_PERSONAL_DERIVED_DATA:-$HOME/Library/Developer/Xcode/DerivedData/cmux-$BUILD_TAG}"
 unset CMUX_TUI_CLIENT_LOCAL CMUX_SKIP_CMUX_TUI_CLIENT CMUX_ALLOW_UNSIGNED_DEV_APP
 export CMUX_DEV_BACKEND_MODE=local
@@ -105,13 +105,14 @@ probe = json.loads(sys.argv[3])
 if manifest["commit"] != sys.argv[2] or probe.get("build_identity") != sys.argv[2]:
     raise SystemExit("Bundled cmux-tui does not match the personal client pin.")
 PY
-/usr/bin/codesign --verify --deep --strict "$APP_PATH"
+python3 scripts/personal-macos-portable.py "$APP_PATH" "$ACTUAL_BUNDLE_ID" \
+  --receipt "$OUTPUT_DIR/portable-bundle.json"
 ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
 (
   cd "$OUTPUT_DIR"
   shasum -a 256 "cmux-$BUILD_TAG.zip" > "cmux-$BUILD_TAG.zip.sha256"
 )
-python3 - "$OUTPUT_DIR/build-receipt.json" "$BUILD_TAG" "$ACTUAL_BUNDLE_ID" "$CLIENT_COMMIT" <<'PY'
+python3 - "$OUTPUT_DIR/build-receipt.json" "$BUILD_TAG" "$ACTUAL_BUNDLE_ID" "$CLIENT_COMMIT" "$OUTPUT_DIR/portable-bundle.json" <<'PY'
 import datetime
 import json
 import subprocess
@@ -133,6 +134,8 @@ receipt = {
     "appHostTestTargetCompiled": False,
     "appHostTestsExecuted": False,
 }
+with open(sys.argv[5]) as source:
+    receipt.update(json.load(source))
 with open(sys.argv[1], "w") as output:
     json.dump(receipt, output, indent=2)
     output.write("\n")
