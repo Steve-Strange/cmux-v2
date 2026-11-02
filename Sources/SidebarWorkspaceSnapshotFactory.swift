@@ -168,7 +168,7 @@ struct SidebarWorkspaceSnapshotFactory {
             remoteWorkspaceSidebarText: remoteWorkspaceSidebarText,
             remoteConnectionStatusText: remoteConnectionStatusText,
             remoteStateHelpText: remoteStateHelpText,
-            showsRemoteReconnectAffordance: !workspace.isManagedCloudVMWorkspace
+            showsRemoteReconnectAffordance: workspace.isRemoteWorkspace && !workspace.isManagedCloudVMWorkspace
                 && (remoteDisplayState == .suspended
                     || remoteDisplayState == .disconnected
                     || remoteDisplayState == .error),
@@ -261,10 +261,11 @@ struct SidebarWorkspaceSnapshotFactory {
     }
 
     private var remoteWorkspaceSidebarText: String? {
+        if let plainSSH = workspace.plainSSHWorkspaceConnectionPresentation { return plainSSH.host.label }
         guard workspace.isRemoteWorkspace else { return nil }
         let target = workspace.remoteDisplayTarget?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let target, !target.isEmpty {
-            guard let sessionName = workspace.remoteConfiguration?.terminalProfile.tmuxSessionName else { return target }
+            guard let sessionName = workspace.sshTmuxSessionName else { return target }
             return [target, sessionName].joined(separator: " · ")
         }
         return String(localized: "sidebar.remote.subtitleFallback", defaultValue: "Remote workspace")
@@ -298,7 +299,10 @@ struct SidebarWorkspaceSnapshotFactory {
     }
 
     private var remoteConnectionStatusText: String {
-        remoteDisplayState.displayLabel
+        if let plainSSH = workspace.plainSSHWorkspaceConnectionPresentation { return plainSSH.statusText }
+        guard workspace.remoteConfiguration?.transport == .ssh else { return remoteDisplayState.displayLabel }
+        let managed = String(localized: "terminal.connection.managed", defaultValue: "Managed")
+        return [remoteDisplayState.displayLabel, managed].joined(separator: " · ")
     }
 
     private var remoteDisplayState: WorkspaceRemoteConnectionState {
@@ -306,12 +310,19 @@ struct SidebarWorkspaceSnapshotFactory {
     }
 
     private var remoteStateHelpText: String {
+        if let plainSSH = workspace.plainSSHWorkspaceConnectionPresentation {
+            var lines = [plainSSH.host.detail, plainSSH.statusText, plainSSH.helpText]
+            if let panelId = workspace.focusedPanelId, let directory = workspace.plainSSHDirectory(panelId: panelId) {
+                lines.append(directory)
+            }
+            return lines.joined(separator: "\n")
+        }
         let panelId = workspace.focusedPanelId
         let presentation = TerminalConnectionPresentation(
             origin: "",
             title: panelId.flatMap { workspace.panelTitle(panelId: $0) } ?? "",
             directory: workspace.presentedCurrentDirectory,
-            sessionName: workspace.remoteConfiguration?.terminalProfile.tmuxSessionName
+            sessionName: workspace.sshTmuxSessionName
                 ?? workspace.remoteTmuxSessionMirror?.sessionName
         )
         var lines = [remoteConnectionHelpSummary] + presentation.detailLines

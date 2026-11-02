@@ -844,7 +844,7 @@ enum TerminalSSHSessionDetector {
         }
     }
 
-    private static func parseSSHCommandLine(_ arguments: [String]) -> DetectedSSHSession? {
+    static func parseSSHCommandLine(_ arguments: [String]) -> DetectedSSHSession? {
         guard !arguments.isEmpty else { return nil }
 
         var index = 0

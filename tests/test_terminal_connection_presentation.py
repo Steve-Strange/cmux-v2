@@ -34,6 +34,7 @@ class TerminalConnectionPresentationTests(unittest.TestCase):
                 "-I", str(build), "-L", str(build), "-lCmuxCore", "-lCmuxCloudTui", "-Xlinker", "-rpath", "-Xlinker", str(build),
                 str(ROOT / "Sources/SSHConnectionPresentation.swift"),
                 str(ROOT / "Sources/TerminalConnectionPresentation.swift"),
+                str(ROOT / "Sources/ConfiguredTmuxSessionPresentation.swift"),
                 str(ROOT / "Sources/Workspace+TerminalConnectionPresentation.swift"),
                 str(ROOT / "Sources/WorkspaceRemoteConnectionState+DisplayLabel.swift"),
                 str(ROOT / "tests/fixtures/TerminalConnectionPresentationFixture.swift"),

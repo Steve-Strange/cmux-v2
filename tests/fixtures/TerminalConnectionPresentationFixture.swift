@@ -49,6 +49,7 @@ final class Workspace {
     func machineOwningSurface(_ panelId: UUID) -> Machine? { machinesByPanelID[panelId] }
     func tuiMirrorSession(for panelId: UUID) -> MirrorSession? { mirrorsByPanelID[panelId] }
     func plainSSHConnectionPresentation(panelId: UUID) -> PlainSSHConnectionPresentation? { plainSSHDisplays[panelId] }
+    func plainSSHDirectory(panelId: UUID) -> String? { nil }
     func sshConnectionPresentation() -> SSHConnectionPresentation? {
         guard usesSSHTui else { return nil }
         return SSHConnectionPresentation(resumeEnabled: remoteConnectionResumeEnabled,
@@ -154,6 +155,17 @@ struct TerminalConnectionPresentationFixture {
         workspace.mirrorsByPanelID[remote] = MirrorSession(phase: .attached)
         let configuredTmux = workspace.tabDisplayTitle(panelId: remote, fallback: "Codex")
         if !configuredTmux.contains("tmux session: hand") { failures.append("Exact configured tmux attach session is hidden by the shell profile: \(configuredTmux)") }
+        let condaAttach = ConfiguredTmuxSessionPresentation(arguments: ["/home/admin/.conda/envs/kalibr/bin/tmux", "attach-session", "-t", "=hand"])
+        if condaAttach?.sessionName != "hand" { failures.append("Existing Conda tmux attach identity is not displayed") }
+        for opaque in [
+            ["tmux", "new-session", "-t", "=hand"],
+            ["tmux", "attach", "-t", "hand"],
+            ["tmux", "attach", "-t", "=hand:1"],
+            ["tmux", "attach", "-t", "=hand", ";", "kill-session"],
+            ["ssh", "attach", "-t", "=hand"],
+        ] {
+            if ConfiguredTmuxSessionPresentation(arguments: opaque) != nil { failures.append("An ambiguous remote command was presented as a known tmux session") }
+        }
         let root = TerminalConnectionPresentation(origin: "Local", title: "zsh", directory: "/", sessionName: nil)
         if !root.tabTitle.hasSuffix(" | /") { failures.append("Root directory disappeared") }
         if !failures.isEmpty {

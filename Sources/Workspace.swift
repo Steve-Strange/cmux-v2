@@ -1423,7 +1423,10 @@ extension Workspace {
         using surfaceResumeBindingIndex: SurfaceResumeBindingIndex,
         restorableAgentIndex: RestorableAgentSessionIndex? = nil
     ) {
-        guard surfaceResumeBindingIndex.isAvailable else { return }; for panelId in panels.keys {
+        guard surfaceResumeBindingIndex.isAvailable else { return }
+        let previousSSHPresentation = plainSSHConnectionPresentations
+        defer { refreshPlainSSHConnectionPresentation(previous: previousSSHPresentation) }
+        for panelId in panels.keys {
             let storedBinding = surfaceResumeBindingsByPanelId[panelId]
             let detectedBinding = surfaceResumeBindingIndex.binding(workspaceId: id, panelId: panelId)
             if surfaceResumeBindingIndex.hasAmbiguousPanel(panelId), detectedBinding == nil {
@@ -2125,6 +2128,7 @@ extension Workspace {
                     observedPlainSSHPanelIds.remove(terminalPanel.id)
                     plainSSHDetectionMissesByPanelId[terminalPanel.id] = 0
                 }
+                refreshTerminalConnectionTitle(panelId: terminalPanel.id)
             } else {
                 if surfaceResumeBindingRemovalAllowed(panelId: terminalPanel.id) {
                     surfaceResumeBindingsByPanelId.removeValue(forKey: terminalPanel.id)
@@ -3257,7 +3261,8 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
     @Published var remoteConfiguration: WorkspaceRemoteConfiguration? {
         didSet {
             if oldValue?.displayTarget != remoteConfiguration?.displayTarget
-                || oldValue?.terminalProfile != remoteConfiguration?.terminalProfile {
+                || oldValue?.terminalProfile != remoteConfiguration?.terminalProfile
+                || oldValue?.configuredRemoteCommand != remoteConfiguration?.configuredRemoteCommand {
                 refreshTerminalConnectionTitles()
             }
             // Window titles append the host (`hostLabel`); refresh them only when
@@ -6307,7 +6312,8 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         if usesRemoteDirectoryProvenance {
             notifyPresentedCurrentDirectoryChanged(from: previousPresentedDirectory, force: provenanceChanged)
         }
-        if remoteConfiguration?.transport == .ssh, directoryChanged || provenanceChanged {
+        if remoteConfiguration?.transport == .ssh || plainSSHConnectionPresentation(panelId: panelId) != nil,
+           directoryChanged || provenanceChanged {
             refreshTerminalConnectionTitle(panelId: panelId)
         }
         return true
@@ -6315,6 +6321,8 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
 
     func updatePanelShellActivityState(panelId: UUID, state: PanelShellActivityState) {
         guard panels[panelId] != nil else { return }
+        let previousSSHPresentation = plainSSHConnectionPresentations
+        defer { refreshPlainSSHConnectionPresentation(previous: previousSSHPresentation) }
         let previousState = panelShellActivityStates[panelId] ?? .unknown
 
         if surfaceResumeBindingsByPanelId[panelId]?.isPlainSSHProcessDetectedBinding == true {
@@ -8035,7 +8043,7 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
                 port: remoteConfiguration.port ?? optionPort
             ) ?? .local
         }
-        return .local
+        return plainSSHWorkspaceConnectionPresentation?.host ?? .local
     }
 
     func cloudTerminalReconnectOverlayPresentation(forSurfaceId surfaceId: UUID) -> CloudTerminalReconnectOverlayPolicy.Presentation? {
@@ -14309,6 +14317,7 @@ extension Workspace: BonsplitDelegate {
         }
         gitBranch = panelGitBranches[panelId]
         pullRequest = panelPullRequests[panelId]
+        refreshPlainSSHFocusPresentation()
 
         // Broadcast the focus change. This is deferred + coalesced (not posted
         // synchronously) so the `@Published` mutations above settle before any

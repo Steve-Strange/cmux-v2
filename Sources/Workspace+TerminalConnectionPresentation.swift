@@ -6,7 +6,14 @@ extension Workspace {
     /// shell/user title for naming, restore, and remote rename ownership.
     func tabDisplayTitle(panelId: UUID, fallback: String) -> String {
         let title = resolvedPanelTitle(panelId: panelId, fallback: fallback)
-        guard panels[panelId]?.panelType == .terminal,
+        guard panels[panelId]?.panelType == .terminal else { return title }
+        if let plainSSH = plainSSHConnectionPresentation(panelId: panelId) {
+            return TerminalConnectionPresentation(
+                origin: plainSSH.origin, title: title,
+                directory: plainSSHDirectory(panelId: panelId), sessionName: nil
+            ).tabTitle
+        }
+        guard
               remoteConfiguration?.transport == .ssh,
               !isRemoteTmuxMirror else { return title }
         let isRemote = machineOwningSurface(panelId)?.isSSH == true
@@ -19,7 +26,8 @@ extension Workspace {
             let label = state == .connected
                 ? String(localized: "terminal.connection.remote", defaultValue: "Remote")
                 : state.displayLabel
-            origin = [label, remoteDisplayTarget].compactMap { $0 }.joined(separator: " · ")
+            let managed = String(localized: "terminal.connection.managed", defaultValue: "Managed")
+            origin = [label, remoteDisplayTarget, managed].compactMap { $0 }.joined(separator: " · ")
         } else {
             origin = String(localized: "commandPalette.currentWork.local", defaultValue: "Local")
         }
@@ -27,7 +35,7 @@ extension Workspace {
             origin: origin,
             title: title,
             directory: effectivePanelDirectory(panelId: panelId),
-            sessionName: isRemote ? remoteConfiguration?.terminalProfile.tmuxSessionName : nil
+            sessionName: isRemote ? sshTmuxSessionName : nil
         ).tabTitle
     }
 
