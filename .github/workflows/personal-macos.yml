@@ -151,6 +151,13 @@ jobs:
       - name: Clean up isolated app-host home
         if: ${{ always() && steps.prepare-app-host-home.outcome != 'skipped' && steps.prepare-app-host-home.outcome != '' }}
         run: scripts/ci/run-in-console-session.sh scripts/ci/cleanup-app-host-home.sh
+      - name: Preserve tagged reload diagnostics
+        if: always()
+        run: |
+          mkdir -p build/personal-macos
+          if [[ -f /tmp/cmux-reload-steve-ssh.log ]]; then
+            cp /tmp/cmux-reload-steve-ssh.log build/personal-macos/reload.log
+          fi
       - name: Upload app and build receipt
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
