@@ -521,6 +521,14 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
             #endif
         }
         guard isCurrentRefresh(lifecycle: lifecycle, refresh: generation) else { return false }
+        // The graph response may have arrived just before the physical route
+        // went down. Its contents never override the carrier's newer status.
+        let transportStatus = await links.status(machineID: machineID)
+        guard isCurrentRefresh(lifecycle: lifecycle, refresh: generation) else { return false }
+        if let transportStatus, transportStatus.state != .connected {
+            linkState = transportStatus.state
+            linkError = transportStatus.error ?? linkError
+        }
         // An earlier pass's rescan can land during this snapshot read; publish the inventory it accepted.
         let currentPorts = supportsPortPreviews ? portsCache?.ports ?? [] : []
         if let eventsFeedWarning {
@@ -546,7 +554,9 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
             // current. A failed or stale read keeps the graph for diagnosis but
             // marks it stale, so agents can see it without treating it as truth.
             let stateAdvancedDuringRead = cloudStateInstallVersion != requestVersion
-            snapshotEstablishedCurrentGraph = snapshotEstablishedCurrentGraph || stateAdvancedDuringRead
+            let transportConnected = transportStatus.map { $0.state == .connected } ?? (linkState == .connected)
+            snapshotEstablishedCurrentGraph = transportConnected
+                && (snapshotEstablishedCurrentGraph || stateAdvancedDuringRead)
             // A successful snapshot is current even when the subscription is degraded. The
             // warning stays in machine info, so agents see both the exact last read and the
             // missing live-feed guarantee instead of an apparently permanent stale graph.
@@ -854,11 +864,12 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
         _ state: CloudVMState,
         impact: CloudVMStateDeltaImpact,
         ports: [Int],
-        reconcileTitles: Bool
+        reconcileTitles: Bool,
+        observation: CloudVMStateObservation = .current
     ) {
         guard cloudState == state, canPublishCloudState(state) else { return }
         if impact.requiresFullResourceRebuild {
-            publish(state, ports: ports, reconcileTitles: reconcileTitles)
+            publish(state, ports: ports, reconcileTitles: reconcileTitles, observation: observation)
             return
         }
         var affected = impact.resourceIDs
@@ -874,7 +885,7 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
         }
         info.remoteWorkspaces = remoteWorkspaces(for: state)
         let previousIDs = Set(catalog.authoritativeSnapshot.resources(on: machine).map(\.id))
-        let acceptedObservation = observationWithPendingWrites()
+        let acceptedObservation = observationWithPendingWrites(observation)
         let changed = catalog.applyCloudStateResourcePatch(
             state,
             resources: resources,
@@ -896,7 +907,7 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
         if changed.contains(where: { $0.kind == .terminal && !previousIDs.contains($0) }) {
             reprojectRestoredPanes(generation: lifecycleGeneration)
         }
-        closePanesForVanishedRemoteTerminals(observation: .current)
+        closePanesForVanishedRemoteTerminals(observation: observation)
         // Membership and name rows arrive as projection deltas, not full rebuilds.
         discoverMemberDisplaysIfNeeded(state)
         applyDisplayNamesIfChanged(state)
@@ -1651,6 +1662,12 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
         guard watchedLink === link else { return }
         switch change {
         case .connected:
+            let state = await link.state
+            guard watchedLink === link else { return }
+            info.linkState = state
+            info.linkError = nil
+            catalog.updateMachine(info, from: self)
+            guard state == .connected else { return }
             guestURLService?.stop()
             // A link can recover after the shared WireGuard hub briefly fails
             // to publish its listener. Always refresh on the successful
@@ -1658,6 +1675,11 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
             // machine, ports, and display rows immediately.
             scheduleRefresh(force: true)
             notificationSync?.linkDidConnect()
+        case .transportStateChanged(let state):
+            info.linkState = state
+            info.linkError = nil
+            catalog.updateMachine(info, from: self)
+            catalog.markCloudStateStale(on: machine, reason: "transport_\(state.rawValue)")
         case .snapshot(let cursor, _, let payload):
             guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
                   let incoming = CmuxTuiSnapshotParser.state(fromSnapshot: object, machine: machine),
@@ -1680,9 +1702,12 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
                 ) {
                     eventsFeedWarning = nil
                 }
-                info.linkState = .connected
+                let state = await link.state
+                guard watchedLink === link, canPublishCloudState(incoming) else { return }
+                info.linkState = state
                 info.linkError = nil
-                publish(incoming, ports: portsCache?.ports ?? [])
+                publish(incoming, ports: portsCache?.ports ?? [],
+                        observation: state == .connected ? .current : .stale(reason: "transport_\(state.rawValue)"))
                 reprojectRestoredPanes(generation: lifecycleGeneration)
                 syncNotifications(from: incoming)
             }
@@ -1744,14 +1769,17 @@ final class CmuxTuiSurfaceProvider: SurfaceProvider {
                 equalCursorConflict = nil
                 await link.setEventsCursor(next.cursor)
                 guard watchedLink === link, canPublishCloudState(next) else { return }
-                info.linkState = .connected
+                let state = await link.state
+                guard watchedLink === link, canPublishCloudState(next) else { return }
+                info.linkState = state
                 info.linkError = nil
                 let titlesChanged = current.workspaces != next.workspaces || current.tabs != next.tabs
                 publishDelta(
                     next,
                     impact: application.impact,
                     ports: portsCache?.ports ?? [],
-                    reconcileTitles: titlesChanged
+                    reconcileTitles: titlesChanged,
+                    observation: state == .connected ? .current : .stale(reason: "transport_\(state.rawValue)")
                 )
                 syncNotifications(from: next)
             }

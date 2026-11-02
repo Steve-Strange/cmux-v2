@@ -86,6 +86,7 @@ struct CloudLinkTransportStateFixture {
         """.write(to: client, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: client.path)
         let link = CloudMachineLink(machineID: "fixture", clientURL: client, paths: CloudTuiClientPaths(home: root))
+        let initialEventStarts = await CloudLinkControlFixture.shared.starts
         let observations = CloudLinkStateObservations()
         let observer = Task {
             for await change in link.changes {
@@ -105,6 +106,7 @@ struct CloudLinkTransportStateFixture {
                 try require(await observations.wait(after: baseline) { $0.state == .connected },
                             "first recovery was not published")
             }
+            await CloudLinkControlFixture.shared.waitForStarts(initialEventStarts + 1)
             let baseline = await observations.count
             try writer.write(contentsOf: Data("reconnecting\n".utf8))
             try require(await observations.wait(after: baseline) { $0.state == .connecting },

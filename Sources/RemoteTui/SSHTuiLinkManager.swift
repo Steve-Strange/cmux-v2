@@ -108,9 +108,9 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
 
     private func readyConnection(revision: UInt64) async throws -> CloudMachineLink.Connected? {
         guard let observed = current else { return nil }
-        let isConnected = await observed.isConnected
+        let isSocketReady = await observed.isSocketReady
         try await requireConnectionIntent(revision)
-        guard current === observed, isConnected else { return nil }
+        guard current === observed, isSocketReady else { return nil }
         let ready = await observed.connected
         try await requireConnectionIntent(revision)
         guard current === observed else { throw CancellationError() }
@@ -139,7 +139,7 @@ actor SSHTuiLinkManager: RemoteTuiLinkManaging {
                || replacement.configuration.agentSocketPathOverrideIsSet != connection.configuration.agentSocketPathOverrideIsSet),
               connecting == nil else { return }
         let observed = current
-        if let observed, await observed.isConnected { return }
+        if let observed, await observed.isSocketReady { return }
         // The check above suspends; a carrier started meanwhile keeps its options.
         guard current === observed, connecting == nil else { return }
         connection = replacement

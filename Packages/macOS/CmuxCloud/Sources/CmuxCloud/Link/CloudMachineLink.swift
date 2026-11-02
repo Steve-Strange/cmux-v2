@@ -9,8 +9,9 @@ import Darwin
 ///
 /// Lifecycle: `connect` spawns the client and resolves once the first
 /// `connection-snapshot` line names the socket; the process is kept until `disconnect`
-/// or until it exits on its own (machine slept, route expired), which flips the state
-/// and ends the `changes` stream so the owner can re-link on demand.
+/// or until it exits on its own (machine slept, route expired), which ends the
+/// `changes` stream so the owner can re-link on demand. Later connection snapshots
+/// report network recovery without retiring the client's stable local socket.
 public actor CloudMachineLink {
     /// Stable reason emitted when the bounded event-feed recovery budget is spent.
     /// Providers use the same value when deciding whether a later healthy stream
@@ -48,6 +49,9 @@ public actor CloudMachineLink {
     /// its cursor before it can replace the installed `CloudVMState`.
     public enum Change: Sendable, Equatable {
         case connected
+        /// The physical route changed while the headless client and its local
+        /// socket remain alive. Existing terminal and event streams can resume.
+        case transportStateChanged(SurfaceLinkState)
         case snapshot(cursor: CloudVMCursor, resetReason: String?, payload: Data)
         case delta(cursor: CloudVMCursor, previousRevision: UInt64, revision: UInt64, payload: Data)
         case streamEnded(reason: String, cursor: CloudVMCursor?)
@@ -156,6 +160,9 @@ public actor CloudMachineLink {
     /// must never contaminate a retry's diagnostics.
     private var stderrDrainTask: Task<Void, Never>?
     private var stderrGeneration: UUID?
+    /// The latest physical state, including a snapshot read before `connect`
+    /// has installed the first local socket. Older clients omit this field.
+    private var reportedTransportState: SurfaceLinkState?
     /// Releases this link's claim on the app's WireGuard hub; runs once when the link ends.
     private var releaseHubLease: (@Sendable () async -> Void)?
 
@@ -183,6 +190,12 @@ public actor CloudMachineLink {
 
     public var isConnected: Bool { connected != nil && state == .connected }
 
+    /// Whether the existing headless client still owns its ready local socket.
+    ///
+    /// A physical route can be reconnecting while this remains true. Managers
+    /// reuse that carrier so its reliable streams and remote sessions survive.
+    public var isSocketReady: Bool { connected != nil && process?.isRunning == true }
+
     /// Spawns the headless client against `route` and waits for its local socket.
     ///
     /// `carrier` dials the machine's trusted listener with no enrollment; false presents
@@ -201,7 +214,7 @@ public actor CloudMachineLink {
         sshUpgrade: Bool = false,
         releaseHubLease: (@Sendable () async -> Void)? = nil
     ) async throws -> Connected {
-        if let connected, state == .connected {
+        if let connected, isSocketReady {
             await releaseHubLease?()
             return connected
         }
@@ -209,6 +222,7 @@ public actor CloudMachineLink {
         stderrDrainTask = nil
         let stderrGeneration = UUID()
         self.stderrGeneration = stderrGeneration
+        reportedTransportState = nil
         stderrTail.removeAll(keepingCapacity: true)
         self.releaseHubLease = releaseHubLease
         eventsCursor = nil
@@ -259,14 +273,14 @@ public actor CloudMachineLink {
         let stderrDrain = drainStderr(stderr.fileHandleForReading, generation: stderrGeneration)
         stderrDrainTask = stderrDrain
 
-        // The first connection-snapshot line names the socket; later lines only update
-        // transport topology and are ignored — but stdout keeps draining for the
-        // process's whole life so the client never blocks on a full pipe.
+        // The local socket outlives physical route reconnects. Consume every
+        // snapshot so the UI sees an outage even while the reliable streams
+        // retain their Unix connections and wait for the route to recover.
         let firstSocket = CloudLinkFirstValue<String>()
         let stdoutLines = CloudLinkPipe.lines(from: stdout.fileHandleForReading)
-        Task.detached {
+        Task.detached { [weak self] in
             for await line in stdoutLines {
-                if let socket = CmuxTuiSnapshotParser.localSocket(fromLinkLine: line) {
+                if let socket = await self?.consumeClientLine(line, generation: stderrGeneration) {
                     firstSocket.resolve(socket)
                 }
             }
@@ -318,9 +332,13 @@ public actor CloudMachineLink {
         let connected = Connected(socketPath: socketPath, session: session)
         self.connected = connected
         self.resourceConnection = CloudTuiPersistentResourceConnection(socketPath: socketPath, clock: deadlineClock)
-        state = .connected
-        await startEventsSubscription(socketPath: socketPath, cursor: nil)
-        changesContinuation.yield(.connected)
+        state = reportedTransportState ?? .connected
+        if state == .connected {
+            await startEventsSubscription(socketPath: socketPath, cursor: nil)
+        }
+        // A reconnect snapshot can arrive during the event-stream handshake.
+        // Publish the physical state that is current after that suspension.
+        publishTransportState()
         return connected
     }
 
@@ -347,6 +365,7 @@ public actor CloudMachineLink {
         stderrDrainTask?.cancel()
         stderrDrainTask = nil
         stderrGeneration = nil
+        reportedTransportState = nil
         stderrTail.removeAll(keepingCapacity: true)
         changesContinuation.finish()
         if let oldEventStreamID { await oldResource?.cancelStream(oldEventStreamID) }
@@ -469,6 +488,9 @@ public actor CloudMachineLink {
                 // a replacement while durable workspace/terminal state stays
                 // on the machine.
                 guard resourceConnection === channel else { throw LinkError.requestTimedOut }
+                // The runtime owns recovery of a known physical outage. A
+                // timed-out request must not kill its resumable local streams.
+                guard !isSocketReady || state == .connected else { throw LinkError.requestTimedOut }
                 await disconnect()
             }
             throw LinkError.requestTimedOut
@@ -502,6 +524,40 @@ public actor CloudMachineLink {
     }
 
     // MARK: - internals
+
+    /// Accepts only this client's socket and known physical states. Graph
+    /// snapshots and unknown future transport fields cannot imply link health.
+    private func consumeClientLine(_ line: String, generation: UUID) -> String? {
+        guard stderrGeneration == generation, process?.isRunning == true,
+              let socket = CmuxTuiSnapshotParser.localSocket(fromLinkLine: line),
+              connected == nil || connected?.socketPath == socket else { return nil }
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let connection = object["connection"] as? [String: Any],
+              let rawState = connection["state"] as? String else { return socket }
+        let next: SurfaceLinkState
+        switch rawState {
+        case "connected": next = .connected
+        case "reconnecting", "disconnected": next = .connecting
+        case "closed": next = .unavailable
+        default: return socket
+        }
+        reportedTransportState = next
+        guard connected != nil, state != next else { return socket }
+        state = next
+        lastError = nil
+        publishTransportState()
+        if next == .connected { scheduleEventsRecovery() }
+        return socket
+    }
+
+    private func publishTransportState() {
+        if state == .connected {
+            changesContinuation.yield(.connected)
+        } else {
+            changesContinuation.yield(.transportStateChanged(state))
+        }
+    }
 
     @discardableResult
     private func startEventsSubscription(socketPath: String, cursor: CloudVMCursor?) async -> Bool {
@@ -557,7 +613,7 @@ public actor CloudMachineLink {
             // Unknown data is a barrier. Its cursor cannot be trusted because the
             // missing item may itself have changed the graph.
             break
-        case .connected:
+        case .connected, .transportStateChanged:
             break
         }
         changesContinuation.yield(change)

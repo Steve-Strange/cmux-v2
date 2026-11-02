@@ -29,9 +29,29 @@ struct SSHSharedCarrierPauseFixture {
         await links.disconnect()
         print("carrier starts=\(starts), stops=\(stops), restarted after disconnect=\(implicitRestarted)")
         if implicitRestarted || starts != 1 || stops != 1 { exit(1) }
+        try await reuseRecoveringCarrier()
         try await sharedConsumerAndResumeCases()
         try await resumeDuringTeardown()
         try await SSHExplicitSurfaceIntentFixture.run()
+    }
+
+    @MainActor
+    private static func reuseRecoveringCarrier() async throws {
+        let probe = CloudCarrierProbe()
+        let links = SSHTuiLinkManager(connection: SSHTuiConnection(),
+            clientURL: URL(fileURLWithPath: "/unused"), paths: CloudTuiClientPaths(probe: probe),
+            isEnabled: { true })
+        _ = try await links.connected(machineID: "ssh:fixture")
+        let original = await links.link(machineID: "ssh:fixture")!
+        await original.beginRecovery()
+        _ = try await links.connected(machineID: "ssh:fixture")
+        let retained = await links.link(machineID: "ssh:fixture")
+        let starts = await probe.starts
+        let stops = await probe.stops
+        precondition(retained === original, "query replaced the recovering carrier")
+        precondition(starts == 1 && stops == 0, "query restarted physical recovery")
+        await links.disconnect()
+        print("PASS recovering carrier is reused by a new connection request")
     }
 
     @MainActor

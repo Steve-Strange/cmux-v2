@@ -65,9 +65,17 @@ actor CloudLinkControlFixture {
     private var eventContinuations: [AsyncStream<Data>.Continuation] = []
     private(set) var starts = 0
     private(set) var closes = 0
+    private var startWaiters: [(count: Int, value: CloudLinkFirstValue<Bool>)] = []
     func started(_ continuation: AsyncStream<Data>.Continuation) {
         starts += 1
         eventContinuations.append(continuation)
+        for waiter in startWaiters where starts >= waiter.count { waiter.value.resolve(true) }
+    }
+    func waitForStarts(_ count: Int) async {
+        guard starts < count else { return }
+        let value = CloudLinkFirstValue<Bool>()
+        startWaiters.append((count, value))
+        _ = await value.result
     }
     func closed() { closes += 1 }
     func emitSnapshot(revision: UInt64) {

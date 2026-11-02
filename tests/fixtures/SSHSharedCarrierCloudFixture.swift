@@ -58,11 +58,13 @@ public actor CloudMachineLink {
         public let session = "cmux"
         public init() {}
     }
-    public enum State: Sendable { case connected, unavailable }
+    public enum State: Sendable { case connected, connecting, unavailable }
     public private(set) var connected: Connected?
     public private(set) var state = State.unavailable
     public var lastError: String? { nil }
-    public var isConnected: Bool { connected != nil }
+    public var isConnected: Bool { connected != nil && state == .connected }
+    public var isSocketReady: Bool { connected != nil }
+    public func beginRecovery() { state = .connecting }
     private let probe: CloudCarrierProbe
     public init(machineID: String, clientURL: URL, paths: CloudTuiClientPaths) { probe = paths.probe }
     public func connect(route: String, session: String, carrier: Bool, timeout: Duration,

@@ -260,7 +260,7 @@ public actor CloudMachineLinkManager {
             let resumed = try await task.value
             recordLocalMachineStatus(resumed, for: machineID)
         }
-        if let link = links[machineID], await link.isConnected, let connected = await link.connected {
+        if let link = links[machineID], await link.isSocketReady, let connected = await link.connected {
             return connected
         }
         if let inFlight = connecting[machineID] {
