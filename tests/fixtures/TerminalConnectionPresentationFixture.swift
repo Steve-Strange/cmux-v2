@@ -13,6 +13,7 @@ enum Phase { case launching, connected, ended }
 struct SessionState { let phase: Phase }
 struct Machine { var isSSH: Bool }
 struct MirrorSession { var phase: CloudTuiManualMirrorPhase; var allowsAutomaticReconnect = true }
+struct PlainSSHConnectionPresentation { let origin: String }
 struct Tab { var title = "" }
 final class Controller {
     var titles: [UUID: String] = [:]
@@ -33,6 +34,9 @@ final class Workspace {
     var carrierConnected: Bool? = nil
     var requiresManualAuthentication = false
     var remoteDisplayTarget: String? = "gpusp"
+    var plainSSHDisplays: [UUID: PlainSSHConnectionPresentation] = [:]
+    var configuredTmuxSessionName: String?
+    var sshTmuxSessionName: String? { remoteConfiguration?.terminalProfile.tmuxSessionName ?? configuredTmuxSessionName }
     var panelTitles: [UUID: String] = [:]
     var directories: [UUID: String] = [:]
     var machinesByPanelID: [UUID: Machine] = [:]
@@ -44,6 +48,7 @@ final class Workspace {
     func isRemoteTerminalSurface(_ panelId: UUID) -> Bool { activeRemoteTerminalSurfaceIds.contains(panelId) }
     func machineOwningSurface(_ panelId: UUID) -> Machine? { machinesByPanelID[panelId] }
     func tuiMirrorSession(for panelId: UUID) -> MirrorSession? { mirrorsByPanelID[panelId] }
+    func plainSSHConnectionPresentation(panelId: UUID) -> PlainSSHConnectionPresentation? { plainSSHDisplays[panelId] }
     func sshConnectionPresentation() -> SSHConnectionPresentation? {
         guard usesSSHTui else { return nil }
         return SSHConnectionPresentation(resumeEnabled: remoteConnectionResumeEnabled,
@@ -134,6 +139,21 @@ struct TerminalConnectionPresentationFixture {
         if !workspace.tabDisplayTitle(panelId: remote, fallback: "Codex").hasPrefix("Error · gpusp") { failures.append("Authentication failure differs between workspace and terminal") }
         workspace.remoteConfiguration = nil
         if workspace.tabDisplayTitle(panelId: local, fallback: "zsh") != "zsh" { failures.append("Ordinary local workspaces should preserve their existing title") }
+        workspace.plainSSHDisplays[local] = PlainSSHConnectionPresentation(origin: "SSH · gpusp · SSH only")
+        let plainSSH = workspace.tabDisplayTitle(panelId: local, fallback: "ssh gpusp")
+        if !plainSSH.hasPrefix("SSH · gpusp · SSH only") { failures.append("Manually typed SSH has no host or SSH-only recovery boundary: \(plainSSH)") }
+        workspace.plainSSHDisplays.removeValue(forKey: local)
+        if workspace.tabDisplayTitle(panelId: local, fallback: "zsh") != "zsh" { failures.append("Exited manual SSH leaves a stale host label") }
+        workspace.remoteConfiguration = Configuration()
+        workspace.remoteConfiguration?.terminalProfile.tmuxSessionName = nil
+        workspace.configuredTmuxSessionName = "hand"
+        workspace.remoteConnectionState = .connected
+        workspace.remoteConnectionResumeEnabled = true
+        workspace.carrierConnected = true
+        workspace.requiresManualAuthentication = false
+        workspace.mirrorsByPanelID[remote] = MirrorSession(phase: .attached)
+        let configuredTmux = workspace.tabDisplayTitle(panelId: remote, fallback: "Codex")
+        if !configuredTmux.contains("tmux session: hand") { failures.append("Exact configured tmux attach session is hidden by the shell profile: \(configuredTmux)") }
         let root = TerminalConnectionPresentation(origin: "Local", title: "zsh", directory: "/", sessionName: nil)
         if !root.tabTitle.hasSuffix(" | /") { failures.append("Root directory disappeared") }
         if !failures.isEmpty {
