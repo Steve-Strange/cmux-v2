@@ -5,6 +5,9 @@ The `Personal macOS build` workflow builds this native branch in
 `codex/macos-ssh-persistence` or a `macos/` branch, then download the
 `cmux-steve-ssh-<commit>` artifact from the completed Actions run. The artifact
 contains a zipped app, its SHA-256 checksum, build log, and JSON build receipt.
+An earlier `cmux-candidate-<commit>` artifact is available after app compilation
+for isolated dogfood while native tests continue; its receipt records those tests
+as pending. The final artifact records the completed test evidence.
 It runs the focused SSH, snapshot, and connection-label tests
 before building. After the app build it compiles the native `cmuxTests` target
 through `scripts/test-unit.sh build-for-testing`, including
@@ -13,7 +16,7 @@ receipt records successful test-target compilation. It does not execute
 the UI test target. It then executes `RemoteWorkspaceReconnectIntentTests`,
 `SSHTuiAttachRetryTests`, `SSHTuiOpenTests`, `RemoteDisconnectLifecycleTests`, and
 `SidebarWorkspaceSnapshotRefreshPolicyTests`, plus the SSH restore cases in
-`CloudStaleInventoryMaterializationTests`, through the existing isolated
+`CloudStaleInventoryMaterializationTests` and `CloudDesktopAccessTests`, through the existing isolated
 app-host and console-session wrappers. Every suite must report a positive test
 count. Test logs and a separate result artifact preserve the actual run evidence;
 the build receipt records completion only after all selected suites pass.

@@ -17,7 +17,7 @@ jobs:
   build:
     if: github.repository == 'Steve-Strange/cmux-v2'
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       GH_TOKEN: ${{ github.token }}
       CMUX_DEV_BACKEND_MODE: local
@@ -70,6 +70,13 @@ jobs:
           python3 tests/test_ssh_browser_forward_lifecycle.py
       - name: Build and archive personal app
         run: ./scripts/personal-macos-build.sh --tag steve-ssh
+      - name: Upload candidate app for isolated dogfood
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cmux-candidate-${{ github.sha }}
+          path: build/personal-macos/
+          if-no-files-found: error
+          retention-days: 7
       - name: Compile native regression test target
         run: |
           set -euo pipefail
@@ -110,7 +117,7 @@ jobs:
           print(candidates[0])
           PY
           )"
-          for suite in RemoteWorkspaceReconnectIntentTests SSHTuiAttachRetryTests SSHTuiOpenTests RemoteDisconnectLifecycleTests SidebarWorkspaceSnapshotRefreshPolicyTests CloudStaleInventoryMaterializationTests; do
+          for suite in RemoteWorkspaceReconnectIntentTests SSHTuiAttachRetryTests SSHTuiOpenTests RemoteDisconnectLifecycleTests SidebarWorkspaceSnapshotRefreshPolicyTests CloudStaleInventoryMaterializationTests CloudDesktopAccessTests; do
             log="build/personal-macos/$suite.log"
             scripts/ci/run-in-console-session.sh \
               scripts/ci/run-app-host-xcodebuild.sh \
@@ -137,6 +144,7 @@ jobs:
               "RemoteWorkspaceReconnectIntentTests", "SSHTuiAttachRetryTests", "SSHTuiOpenTests",
               "RemoteDisconnectLifecycleTests", "SidebarWorkspaceSnapshotRefreshPolicyTests",
               "CloudStaleInventoryMaterializationTests",
+              "CloudDesktopAccessTests",
           ]
           path.write_text(json.dumps(receipt, indent=2) + "\n")
           PY
