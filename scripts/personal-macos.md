@@ -12,7 +12,8 @@ through `scripts/test-unit.sh build-for-testing`, including
 receipt records successful test-target compilation. It does not execute
 the UI test target. It then executes `RemoteWorkspaceReconnectIntentTests`,
 `SSHTuiAttachRetryTests`, `RemoteDisconnectLifecycleTests`, and
-`SidebarWorkspaceSnapshotRefreshPolicyTests` through the existing isolated
+`SidebarWorkspaceSnapshotRefreshPolicyTests`, plus the SSH restore cases in
+`CloudStaleInventoryMaterializationTests`, through the existing isolated
 app-host and console-session wrappers. Every suite must report a positive test
 count. Test logs and a separate result artifact preserve the actual run evidence;
 the build receipt records completion only after all selected suites pass.
