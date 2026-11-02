@@ -665,7 +665,7 @@ final class SurfaceCatalog {
         } else {
             resolvedRemoteView = nil
         }
-        var sshUse = try beginExplicitSSHTransportUse(on: explicitOpen ? [id.machine] : [], in: destination.workspaceID)
+        var sshUse = try beginExplicitSSHTransportUse(on: explicitOpen ? [id.machine] : [])
         defer { endExplicitSSHTransportUse(sshUse) }
         let loadingReservation = CloudMachineLoadingReservation(id, at: destination, remoteView: resolvedRemoteView)
         let materializationKey = MaterializationKey(resource: id, remoteTabID: resolvedRemoteView?.tabID, workspaceID: reuseInWorkspace, loadingPanelID: loadingReservation?.panelID)
@@ -688,9 +688,7 @@ final class SurfaceCatalog {
             }
             let resolved = attachRemoteView(resolvedRemoteView, to: existing)
             if explicitOpen, id.machine.isSSH, let provider = providers[id.machine] as? CmuxTuiSurfaceProvider {
-                if resolved.workspaceID != destination.workspaceID {
-                    sshUse += try beginExplicitSSHTransportUse(on: [id.machine], in: resolved.workspaceID)
-                }
+                sshUse += try beginExplicitSSHTransportUse(on: [id.machine], in: resolved.workspaceID)
                 if resource.kind == .terminal {
                     if let session = provider.manualMirrorSessions[resolved.panelID] {
                         if !session.allowsAutomaticReconnect { _ = session.retryConnection() }
@@ -710,6 +708,9 @@ final class SurfaceCatalog {
             return (resolved, true)
         }
         guard let provider = providers[id.machine] else { throw SurfaceCatalogError.noProvider(id.machine) }
+        if explicitOpen {
+            sshUse += try beginExplicitSSHTransportUse(on: [id.machine], in: destination.workspaceID)
+        }
 
         // The materialization key includes the optional workspace, so scoped
         // opens coalesce only with other opens for that same workspace.

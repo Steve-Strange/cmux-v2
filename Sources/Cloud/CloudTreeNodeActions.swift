@@ -280,7 +280,8 @@ struct CloudTreeNodeActions {
                             into: target,
                             focus: true,
                             reuseExisting: reuseExisting,
-                            reuseInWorkspace: resource.kind == .display ? workspaceID : nil
+                            reuseInWorkspace: resource.kind == .display ? workspaceID : nil,
+                            explicitOpen: true
                         )
                     }
                     let projection = opened.projection
@@ -300,7 +301,8 @@ struct CloudTreeNodeActions {
                         into: try target.get(),
                         focus: true,
                         reuseExisting: reuseExisting,
-                        remoteView: view
+                        remoteView: view,
+                        explicitOpen: true
                     )
                     focusProjection(opened.projection)
                 }
@@ -323,7 +325,8 @@ struct CloudTreeNodeActions {
                             into: .workspace(id: workspaceID, placement: .split),
                             focus: true,
                             reuseExisting: true,
-                            reuseInWorkspace: workspaceID
+                            reuseInWorkspace: workspaceID,
+                            explicitOpen: true
                         )
                         focusProjection(opened.projection)
                     }
@@ -337,7 +340,8 @@ struct CloudTreeNodeActions {
                         focus: true,
                         reuseExisting: true,
                         reuseInWorkspace: workspaceID,
-                        remoteView: view
+                        remoteView: view,
+                        explicitOpen: true
                     )
                     focusProjection(opened.projection)
                 }
@@ -358,6 +362,8 @@ struct CloudTreeNodeActions {
                         try catalog.checkCloudWorkspaceNavigation(machine: machine, workspaceID: remoteWorkspaceID)
                     }
                     guard let provider = catalog.provider(for: machine) else { throw SurfaceCatalogError.noProvider(machine) }
+                    let sshUse = try catalog.beginExplicitSSHTransportUse(on: [machine])
+                    defer { catalog.endExplicitSSHTransportUse(sshUse) }
                     let token = catalog.cloudWorkspaceProjectionCoordinator.beginLocalMutation(on: machine)
                     defer { catalog.cloudWorkspaceProjectionCoordinator.endLocalMutation(token, on: machine, catalog: catalog) }
                     let resource = try await provider.createTerminal(command: nil, cwd: nil, name: nil, remoteWorkspaceID: remoteWorkspaceID)
@@ -367,7 +373,8 @@ struct CloudTreeNodeActions {
                         into: requestedDestination,
                         focus: true,
                         reuseExisting: true,
-                        remoteView: remoteView
+                        remoteView: remoteView,
+                        explicitOpen: true
                     )
                     focusProjection(projection)
                 }
@@ -387,6 +394,8 @@ struct CloudTreeNodeActions {
                             try catalog.checkCloudWorkspaceNavigation(machine: machine, workspaceID: targetRemoteWorkspaceID)
                         }
                         guard let provider = catalog.provider(for: machine) else { throw SurfaceCatalogError.noProvider(machine) }
+                        let sshUse = try catalog.beginExplicitSSHTransportUse(on: [machine])
+                        defer { catalog.endExplicitSSHTransportUse(sshUse) }
                         let resource = try await provider.createTerminal(command: nil, cwd: nil, name: nil, remoteWorkspaceID: targetRemoteWorkspaceID)
                         let remoteView = try CloudTerminalSourcePlacement(machine: machine, remoteWorkspaceID: targetRemoteWorkspaceID).remoteView(of: resource)
                         let (projection, _) = try await catalog.project(
@@ -394,7 +403,8 @@ struct CloudTreeNodeActions {
                             into: requestedDestination,
                             focus: true,
                             reuseExisting: true,
-                            remoteView: remoteView
+                            remoteView: remoteView,
+                            explicitOpen: true
                         )
                         focusProjection(projection)
                     }
@@ -418,6 +428,8 @@ struct CloudTreeNodeActions {
                             try catalog.checkCloudWorkspaceNavigation(machine: machine, workspaceID: targetRemoteWorkspaceID)
                         }
                         guard let provider = catalog.provider(for: machine) else { throw SurfaceCatalogError.noProvider(machine) }
+                        let sshUse = try catalog.beginExplicitSSHTransportUse(on: [machine])
+                        defer { catalog.endExplicitSSHTransportUse(sshUse) }
                         let resource = try await provider.createTerminal(command: nil, cwd: nil, name: nil, remoteWorkspaceID: targetRemoteWorkspaceID)
                         let remoteView = try CloudTerminalSourcePlacement(machine: machine, remoteWorkspaceID: targetRemoteWorkspaceID).remoteView(of: resource)
                         let opened = try await catalog.projectGroupAsNewLocalWorkspace(

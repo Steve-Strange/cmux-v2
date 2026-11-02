@@ -18,13 +18,20 @@ extension Workspace {
     ) {
         let catalog = SurfaceCatalog.shared
         let store = cloudPaneCreationFailureStore
+        var sshUse: SurfaceCatalog.ExplicitSSHTransportUses = []
+        let finish: @MainActor () -> Void = {
+            let completedUse = sshUse
+            sshUse = []
+            catalog.endExplicitSSHTransportUse(completedUse)
+            onFinish()
+        }
         let project: CloudTerminalCreationCoordinator.Project = { [weak self, reservation] created in
             guard let self, !self.isRetiredFromOwningTabManager,
                   self.cloudPendingCreations[reservation.panelID] === reservation else {
-                onFinish()
+                finish()
                 throw CancellationError()
             }
-            defer { onFinish() }
+            defer { finish() }
             // The stable terminal id is available before surface attachment.
             // Route reservation input into that PTY immediately so remote shell
             // startup owns echo and line discipline just like a local shell.
@@ -94,13 +101,13 @@ extension Workspace {
                 if let self, !self.isRetiredFromOwningTabManager,
                    self.cloudPendingCreations[reservation.panelID] === reservation,
                    let use = try? catalog.beginExplicitSSHTransportUse(on: [reservation.machine], in: self.id) {
-                    catalog.endExplicitSSHTransportUse(use)
+                    sshUse += use
                 }
                 self?.restartReservedCloudTerminalPane(reservation)
                 (catalog.provider(for: reservation.machine) as? CmuxTuiSurfaceProvider)?
                     .beginAttachHandshake(for: reservation)
             },
-            onFinish: onFinish,
+            onFinish: finish,
             inlineFailure: { [weak self, reservation] error in
                 self?.failReservedCloudTerminalPane(reservation, error: error)
             },

@@ -76,7 +76,8 @@ extension SurfaceCatalog {
             into: destination,
             focus: focus,
             reuseExisting: reuseExisting,
-            reuseInWorkspace: reuseInWorkspace
+            reuseInWorkspace: reuseInWorkspace,
+            explicitOpen: true
         )
     }
 
