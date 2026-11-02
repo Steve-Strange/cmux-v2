@@ -5,6 +5,14 @@ import Testing
 
 @Suite("SessionRemoteWorkspaceSnapshot persistence shape")
 struct SessionRemoteWorkspaceSnapshotTests {
+    @Test("an explicitly disconnected workspace stays disconnected after a save round trip")
+    func disconnectedIntentSurvivesSave() throws {
+        let data = Data(#"{"transport":"ssh","destination":"gpusp","sshOptions":[],"autoReconnect":false}"#.utf8)
+        let snapshot = try JSONDecoder().decode(SessionRemoteWorkspaceSnapshot.self, from: data)
+        let saved = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        #expect(saved["autoReconnect"] as? Bool == false)
+    }
+
     @Test("restore prefers a live saved agent and falls back after it moves")
     func restoresLiveAgent() {
         let saved = "/tmp/cmux-saved-agent.sock"
