@@ -21,9 +21,18 @@ class TerminalConnectionPresentationTests(unittest.TestCase):
                 "-emit-module-path", str(build / "CmuxCore.swiftmodule"),
             ], capture_output=True, text=True)
             self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            compiled = subprocess.run([
+                "xcrun", "swiftc", "-swift-version", "6", "-emit-module", "-emit-library",
+                "-module-name", "CmuxCloudTui",
+                str(ROOT / "Packages/macOS/CmuxCloudTui/Sources/CmuxCloudTui/CloudTuiManualMirrorPhase.swift"),
+                "-o", str(build / "libCmuxCloudTui.dylib"),
+                "-emit-module-path", str(build / "CmuxCloudTui.swiftmodule"),
+            ], capture_output=True, text=True)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
             result = subprocess.run([
                 "xcrun", "swiftc", "-swift-version", "6", "-parse-as-library",
-                "-I", str(build), "-L", str(build), "-lCmuxCore", "-Xlinker", "-rpath", "-Xlinker", str(build),
+                "-I", str(build), "-L", str(build), "-lCmuxCore", "-lCmuxCloudTui", "-Xlinker", "-rpath", "-Xlinker", str(build),
+                str(ROOT / "Sources/SSHConnectionPresentation.swift"),
                 str(ROOT / "Sources/TerminalConnectionPresentation.swift"),
                 str(ROOT / "Sources/Workspace+TerminalConnectionPresentation.swift"),
                 str(ROOT / "Sources/WorkspaceRemoteConnectionState+DisplayLabel.swift"),

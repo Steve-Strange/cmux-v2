@@ -1,4 +1,5 @@
 import CmuxCore
+import CmuxCloudTui
 import Foundation
 
 // Value-only workspace host. The production tab projection and status labels
@@ -11,8 +12,7 @@ struct Configuration { var transport: Transport = .ssh; var terminalProfile = Pr
 enum Phase { case launching, connected, ended }
 struct SessionState { let phase: Phase }
 struct Machine { var isSSH: Bool }
-enum MirrorPhase { case idle, connecting, attached, disconnected, stopped }
-struct MirrorSession { var phase: MirrorPhase }
+struct MirrorSession { var phase: CloudTuiManualMirrorPhase; var allowsAutomaticReconnect = true }
 struct Tab { var title = "" }
 final class Controller {
     var titles: [UUID: String] = [:]
@@ -28,6 +28,10 @@ final class Workspace {
     var activeRemoteTerminalSurfaceIds = Set<UUID>()
     var remoteTerminalSessionStatesBySurfaceId: [UUID: SessionState] = [:]
     var remoteConnectionState: WorkspaceRemoteConnectionState = .connected
+    var usesSSHTui = false
+    var remoteConnectionResumeEnabled = true
+    var carrierConnected: Bool? = nil
+    var requiresManualAuthentication = false
     var remoteDisplayTarget: String? = "gpusp"
     var panelTitles: [UUID: String] = [:]
     var directories: [UUID: String] = [:]
@@ -40,6 +44,13 @@ final class Workspace {
     func isRemoteTerminalSurface(_ panelId: UUID) -> Bool { activeRemoteTerminalSurfaceIds.contains(panelId) }
     func machineOwningSurface(_ panelId: UUID) -> Machine? { machinesByPanelID[panelId] }
     func tuiMirrorSession(for panelId: UUID) -> MirrorSession? { mirrorsByPanelID[panelId] }
+    func sshConnectionPresentation() -> SSHConnectionPresentation? {
+        guard usesSSHTui else { return nil }
+        return SSHConnectionPresentation(resumeEnabled: remoteConnectionResumeEnabled,
+            controllerState: remoteConnectionState, carrierConnected: carrierConnected,
+            requiresManualAuthentication: requiresManualAuthentication,
+            attachments: mirrorsByPanelID.values.map { .init(phase: $0.phase, allowsAutomaticReconnect: $0.allowsAutomaticReconnect) })
+    }
     func surfaceIdFromPanelId(_ panelId: UUID) -> UUID? { panels[panelId] == nil ? nil : panelId }
 }
 
@@ -96,6 +107,31 @@ struct TerminalConnectionPresentationFixture {
         if !reserved.hasPrefix("Connecting · gpusp") { failures.append("A reserved SSH pane was labeled Local: \(reserved)") }
         workspace.machinesByPanelID.removeValue(forKey: remote)
         if !workspace.tabDisplayTitle(panelId: remote, fallback: "Codex").hasPrefix("Local | ") { failures.append("Removing SSH provenance left a remote label") }
+
+        workspace.usesSSHTui = true
+        workspace.remoteConnectionState = .connected
+        workspace.carrierConnected = false
+        workspace.machinesByPanelID[remote] = Machine(isSSH: true)
+        workspace.mirrorsByPanelID[remote] = MirrorSession(phase: .disconnected)
+        if workspace.sshConnectionPresentation()?.state != .reconnecting { failures.append("A dropped carrier still appears Connected in workspace status") }
+        if !workspace.tabDisplayTitle(panelId: remote, fallback: "Codex").hasPrefix("Reconnecting · gpusp") { failures.append("Network retry is missing from terminal chrome") }
+        workspace.carrierConnected = true
+        workspace.machinesByPanelID[local] = Machine(isSSH: true)
+        workspace.mirrorsByPanelID[local] = MirrorSession(phase: .attached)
+        if workspace.sshConnectionPresentation()?.state != .reconnecting { failures.append("One attached sibling hid another pane's automatic recovery") }
+        if !workspace.tabDisplayTitle(panelId: local, fallback: "zsh").hasPrefix("Remote · gpusp") { failures.append("An attached pane borrowed a sibling's reconnecting status") }
+        workspace.mirrorsByPanelID.removeValue(forKey: local)
+        workspace.remoteConnectionResumeEnabled = false
+        workspace.carrierConnected = true
+        workspace.mirrorsByPanelID[remote] = MirrorSession(phase: .attached)
+        if workspace.sshConnectionPresentation()?.state != .disconnected { failures.append("A shared connected carrier overrode explicit Disconnect") }
+        if !workspace.tabDisplayTitle(panelId: remote, fallback: "Codex").hasPrefix("Disconnected · gpusp") { failures.append("Paused terminal still appears connected") }
+        workspace.remoteConnectionResumeEnabled = true
+        workspace.carrierConnected = false
+        workspace.requiresManualAuthentication = true
+        workspace.mirrorsByPanelID[remote] = MirrorSession(phase: .idle, allowsAutomaticReconnect: false)
+        if workspace.sshConnectionPresentation()?.state != .error { failures.append("Rejected authentication does not show a manual error") }
+        if !workspace.tabDisplayTitle(panelId: remote, fallback: "Codex").hasPrefix("Error · gpusp") { failures.append("Authentication failure differs between workspace and terminal") }
         workspace.remoteConfiguration = nil
         if workspace.tabDisplayTitle(panelId: local, fallback: "zsh") != "zsh" { failures.append("Ordinary local workspaces should preserve their existing title") }
         let root = TerminalConnectionPresentation(origin: "Local", title: "zsh", directory: "/", sessionName: nil)
