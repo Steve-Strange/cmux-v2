@@ -99,7 +99,7 @@ import Testing
         expectedDisplayed = expectedDisplayed.applyingContextMenuImmediateFields(from: next)
         #expect(decision.workspaceSnapshotStorage == expectedDisplayed)
         #expect(decision.workspaceSnapshotStorage?.isPinned == true)
-        #expect(decision.workspaceSnapshotStorage?.remoteConnectionStatusText == "Connected")
+        #expect(decision.workspaceSnapshotStorage?.remoteConnectionStatusText == "Disconnected")
         #expect(decision.workspaceSnapshotStorage?.latestConversationMessage == "old message")
         #expect(decision.workspaceSnapshotStorage?.listeningPorts == [3000])
         #expect(decision.workspaceSnapshotStorage?.finderDirectoryPath == nil)
@@ -155,7 +155,7 @@ import Testing
         )
 
         #expect(decision.workspaceSnapshotStorage?.mediaActivity.isPlayingAudio == false)
-        #expect(decision.workspaceSnapshotStorage?.remoteConnectionStatusText == "Connected")
+        #expect(decision.workspaceSnapshotStorage?.remoteConnectionStatusText == "Disconnected")
         #expect(decision.workspaceSnapshotStorage?.latestConversationMessage == "old message")
         #expect(decision.workspaceSnapshotStorage?.listeningPorts == [3000])
         #expect(decision.pendingWorkspaceSnapshot == next)
