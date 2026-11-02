@@ -46,4 +46,19 @@ final class CloudPortAccessStore {
             }
         }
     }
+
+    /// Clear dead listener URLs while the carrier stops its captured processes.
+    func invalidateTransport(machineID: String) {
+        for (key, model) in models where key.machineID == machineID {
+            model.invalidateTransport()
+        }
+    }
+
+    /// Unused or deliberately paused projections retain their suspended route.
+    func resumeTransport(machineID: String, activeModels: Set<ObjectIdentifier>) {
+        for (key, model) in models
+        where key.machineID == machineID && activeModels.contains(ObjectIdentifier(model)) {
+            model.resumeTransport()
+        }
+    }
 }

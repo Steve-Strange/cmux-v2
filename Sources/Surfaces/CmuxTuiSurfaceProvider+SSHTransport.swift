@@ -11,6 +11,7 @@ extension CmuxTuiSurfaceProvider {
     func resumeSSHTransport() {
         guard let manager = links as? SSHTuiLinkManager else { return }
         manager.transportIntent.resume()
+        resumeSSHBrowserRoutes()
         if notificationSync == nil { installNotificationSync() }
     }
 
@@ -35,6 +36,7 @@ extension CmuxTuiSurfaceProvider {
         let forced = !ManagedRemoteConnectionsPolicy.isEnabled
         guard forced || !hasActiveSSHTransportConsumers(excluding: workspaceID),
               let revision = manager.transportIntent.pause(force: forced) else { return nil }
+        pauseSSHBrowserRoutes()
         stopTransportResources()
         attachmentRetry.cancel()
         for (panelID, task) in restoredAttachTasks {

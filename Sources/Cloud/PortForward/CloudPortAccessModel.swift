@@ -37,6 +37,7 @@ final class CloudPortAccessModel {
     private var observation: Task<Void, Never>?
     private var operation: Task<Void, Never>?
     private var generation = 0
+    @ObservationIgnored private var transportInvalidated = false
 
     init(
         target: CloudPortForwardTarget,
@@ -131,12 +132,28 @@ final class CloudPortAccessModel {
     /// Every materialization, restore, and address-bar open uses this action.
     /// Reusing a model cannot restart an in-flight or established connection.
     func connect() {
-        guard phase == .needsVPN else { return }
+        guard !transportInvalidated, phase == .needsVPN else { return }
         start()
     }
 
     func retry() {
-        guard phase != .closed, phase != .stopping else { return }
+        guard !transportInvalidated, phase != .closed, phase != .stopping else { return }
+        start()
+    }
+
+    /// The carrier owns physical teardown; retire its readiness before that await.
+    func invalidateTransport() {
+        guard phase != .closed else { return }
+        transportInvalidated = true
+        generation += 1
+        operation?.cancel()
+        phase = .needsVPN
+    }
+
+    /// Only a live projection can resume a route after its carrier was paused.
+    func resumeTransport() {
+        guard transportInvalidated, phase != .closed else { return }
+        transportInvalidated = false
         start()
     }
 
@@ -175,6 +192,7 @@ final class CloudPortAccessModel {
         phase = .stopping
         let token = generation
         await pending?.value
+        guard phase != .closed, generation == token else { return }
         if route == .loopback { await stopForward() }
         guard phase != .closed, generation == token else { return }
         phase = .needsVPN

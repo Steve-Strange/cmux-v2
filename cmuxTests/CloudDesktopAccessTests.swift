@@ -318,6 +318,41 @@ struct CloudDesktopAccessTests {
         await model.retire()
     }
 
+    @Test("An SSH carrier pause retires its browser listener and reconnect navigates the original pane")
+    func carrierResumeReplacesBrowserListener() async throws {
+        let store = CloudPortAccessStore()
+        let target = CloudPortForwardTarget(host: "127.0.0.1", port: 4000)
+        var starts = 0
+        let model = store.model(machineID: "ssh:browser-resume", target: target) {
+            CloudPortAccessModel(target: target, coordinator: nil, wake: {}, startForward: { _ in
+                starts += 1
+                return starts == 1 ? 51_001 : 51_002
+            }, stopForward: {}, route: .loopback)
+        }
+        let state = CloudBrowserAccessState()
+        let service = try #require(URL(string: "http://localhost:4000/projects/123?tab=logs#tail"))
+        var navigations: [URL] = []
+        state.configure(model: model, url: service)
+        state.automaticallyNavigate { navigations.append($0) }
+        model.connect()
+        #expect(await wait { navigations.count == 1 })
+        let first = try #require(navigations.first)
+        state.didCommit(url: first)
+        state.didFinish(url: first)
+        #expect(state.showsPage)
+
+        store.invalidateTransport(machineID: "ssh:browser-resume")
+        #expect(!model.isReady)
+        #expect(!state.showsPage)
+        model.retry()
+        #expect(starts == 1, "background retry must retain the carrier pause")
+        store.resumeTransport(machineID: "ssh:browser-resume", activeModels: [ObjectIdentifier(model)])
+        #expect(await wait { navigations.count == 2 })
+        #expect(navigations.last?.absoluteString == "http://127.0.0.1:51002/projects/123?tab=logs#tail")
+        #expect(state.displayURL(navigations.last) == service)
+        await store.remove(machineID: "ssh:browser-resume")
+    }
+
     @Test("Leaving a Cloud page clears its resource provenance")
     func leavingCloudClearsResourceIdentity() {
         let state = CloudBrowserAccessState()
