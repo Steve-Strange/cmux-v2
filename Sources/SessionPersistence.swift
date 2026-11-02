@@ -509,7 +509,10 @@ struct SurfaceResumeBindingSnapshot: Codable, Equatable, Sendable {
     }
 
     var usesLocalRestoreVerb: Bool {
-        launchFlavor == .local
+        // Process scans may retire a tmux binding before its queued startup
+        // input runs. Keep the approved attach independent of that live record.
+        launchFlavor == .local &&
+            !(isProcessDetected && kind?.lowercased() == "tmux")
     }
 
     func shouldYieldToDetectedSurfaceResumeBinding(_ detectedBinding: SurfaceResumeBindingSnapshot) -> Bool {
