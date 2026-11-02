@@ -1,3 +1,4 @@
+import CmuxCore
 import CmuxSidebar
 import CmuxWorkspaces
 import Foundation
@@ -168,8 +169,9 @@ struct SidebarWorkspaceSnapshotFactory {
             remoteConnectionStatusText: remoteConnectionStatusText,
             remoteStateHelpText: remoteStateHelpText,
             showsRemoteReconnectAffordance: !workspace.isManagedCloudVMWorkspace
-                && (workspace.remoteConnectionState == .suspended
-                    || workspace.remoteConnectionState == .disconnected),
+                && (remoteDisplayState == .suspended
+                    || remoteDisplayState == .disconnected
+                    || remoteDisplayState == .error),
             copyableSidebarSSHError: copyableSidebarSSHError,
             latestConversationMessage: workspace.latestConversationMessage,
             // `SidebarAgentUsageFormatter()` reads `Locale.current`, so it is
@@ -273,8 +275,8 @@ struct SidebarWorkspaceSnapshotFactory {
             localized: "sidebar.remote.help.targetFallback",
             defaultValue: "remote host"
         )
-        let detail = workspace.remoteConnectionDetail?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if workspace.remoteConnectionState == .error || workspace.remoteConnectionState == .suspended,
+        let detail = workspace.remoteConnectionDisplayDetail(catalog: catalog)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if remoteDisplayState == .error || remoteDisplayState == .suspended,
            let detail,
            !detail.isEmpty {
             return SidebarRemoteErrorCopySupport.clipboardText(for: [SidebarRemoteErrorCopyEntry(
@@ -296,7 +298,11 @@ struct SidebarWorkspaceSnapshotFactory {
     }
 
     private var remoteConnectionStatusText: String {
-        workspace.remoteConnectionState.displayLabel
+        remoteDisplayState.displayLabel
+    }
+
+    private var remoteDisplayState: WorkspaceRemoteConnectionState {
+        workspace.remoteConnectionDisplayState(catalog: catalog)
     }
 
     private var remoteStateHelpText: String {
@@ -309,8 +315,8 @@ struct SidebarWorkspaceSnapshotFactory {
                 ?? workspace.remoteTmuxSessionMirror?.sessionName
         )
         var lines = [remoteConnectionHelpSummary] + presentation.detailLines
-        if workspace.remoteConnectionState != .error,
-           let detail = workspace.remoteConnectionDetail?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if remoteDisplayState != .error,
+           let detail = workspace.remoteConnectionDisplayDetail(catalog: catalog)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !detail.isEmpty {
             lines.append(detail)
         }
@@ -322,8 +328,8 @@ struct SidebarWorkspaceSnapshotFactory {
             localized: "sidebar.remote.help.targetFallback",
             defaultValue: "remote host"
         )
-        let detail = workspace.remoteConnectionDetail?.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch workspace.remoteConnectionState {
+        let detail = workspace.remoteConnectionDisplayDetail(catalog: catalog)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch remoteDisplayState {
         case .connected:
             return remoteHelp("sidebar.remote.help.connected", "Remote connected to %@", target)
         case .connecting:

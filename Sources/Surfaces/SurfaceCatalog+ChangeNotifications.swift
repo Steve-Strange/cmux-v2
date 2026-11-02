@@ -14,6 +14,11 @@ extension SurfaceCatalog {
             self.pendingChangedMachines.removeAll()
             let global = self.pendingGlobalChange
             self.pendingGlobalChange = false
+            for workspace in self.cloudWorkspaceRenameService.environment.workspaces() {
+                guard let machine = workspace.sshPresentationMachine,
+                      global || machines.isEmpty || machines.contains(machine) else { continue }
+                workspace.postRemoteConnectionPresentationDidChange()
+            }
             NotificationCenter.default.post(
                 name: Self.didChangeNotification,
                 object: self,

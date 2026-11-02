@@ -21,7 +21,7 @@ def main():
         app = args.enable.expanduser().resolve(strict=True)
         with (app / "Contents/Info.plist").open("rb") as source:
             info = plistlib.load(source)
-        if info.get("CFBundleIdentifier") != "com.cmuxterm.app.debug.steve-ssh":
+        if info.get("CFBundleIdentifier") != "com.cmuxterm.app.debug.steve.ssh":
             parser.error("Expected the isolated steve-ssh app.")
         # No KeepAlive: quitting the app stays effective until the next login.
         payload = {

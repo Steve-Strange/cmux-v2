@@ -345,7 +345,7 @@ extension Workspace {
             $activeRemoteTerminalSessionCount
         )
         let directoryChangeRevision = currentDirectoryChangeRevisionPublisher()
-        return Publishers.CombineLatest4(
+        let controllerChanges = Publishers.CombineLatest4(
             workspaceFields,
             metadataFields,
             gitFields,
@@ -392,5 +392,16 @@ extension Workspace {
             .removeDuplicates()
             .map { _ in () }
             .eraseToAnyPublisher()
+
+        let connectionPresentationChanges = NotificationCenter.default.publisher(
+            for: .workspaceRemoteConnectionPresentationDidChange
+        )
+            .filter { [weak self] notification in
+                guard let self else { return false }
+                return notification.object as? Workspace === self
+            }
+            .map { _ in () }
+            .eraseToAnyPublisher()
+        return controllerChanges.merge(with: connectionPresentationChanges).eraseToAnyPublisher()
     }
 }

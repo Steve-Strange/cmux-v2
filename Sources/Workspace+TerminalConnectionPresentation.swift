@@ -33,6 +33,13 @@ extension Workspace {
 
     /// A sibling's connected link does not establish that this pane attached.
     private func terminalConnectionDisplayState(panelId: UUID) -> WorkspaceRemoteConnectionState {
+        if let presentation = sshConnectionPresentation() {
+            if let mirror = tuiMirrorSession(for: panelId) {
+                return presentation.state(for: .init(phase: mirror.phase, allowsAutomaticReconnect: mirror.allowsAutomaticReconnect))
+            }
+            if presentation.state == .connected, cloudPendingCreations[panelId] != nil { return .connecting }
+            return presentation.state
+        }
         if let mirror = tuiMirrorSession(for: panelId) {
             switch mirror.phase {
             case .attached: return .connected
