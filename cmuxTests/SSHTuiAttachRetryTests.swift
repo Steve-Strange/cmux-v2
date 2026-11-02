@@ -41,6 +41,17 @@ struct SSHTuiAttachRetryTests {
         #expect(!SSHTuiAttachRetryPolicy.isPermanent(CloudMachineLink.LinkError.failureMessage("Connection refused")))
     }
 
+    @Test("OpenSSH authentication and host-key failures wait for manual Reconnect", arguments: [
+        "user@host: Permission denied (publickey,password).",
+        "Received disconnect from 192.0.2.1 port 22:2: Too many authentication failures",
+        "Host key verification failed."
+    ])
+    func sshAuthenticationDoesNotRetry(detail: String) {
+        let error = CloudMachineLink.LinkError.exited(status: 255, output: detail)
+        #expect(SSHTuiAttachRetryPolicy.isPermanent(error))
+        #expect(policy.retryDelay(afterFailure: 1, error: error) == nil)
+    }
+
     @Test("Only a link that came up after the failure retries early")
     func linkUpRetriesOnlyAfterADownLink() {
         #expect(SSHTuiAttachRetryPolicy.shouldRetryNow(linkWasConnectedAtFailure: false, linkState: .connected))
