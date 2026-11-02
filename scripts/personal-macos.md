@@ -11,7 +11,7 @@ through `scripts/test-unit.sh build-for-testing`, including
 `RemoteWorkspaceReconnectIntentTests`, with separate test DerivedData. The JSON
 receipt records successful test-target compilation. It does not execute
 the UI test target. It then executes `RemoteWorkspaceReconnectIntentTests`,
-`SSHTuiAttachRetryTests`, `RemoteDisconnectLifecycleTests`, and
+`SSHTuiAttachRetryTests`, `SSHTuiOpenTests`, `RemoteDisconnectLifecycleTests`, and
 `SidebarWorkspaceSnapshotRefreshPolicyTests`, plus the SSH restore cases in
 `CloudStaleInventoryMaterializationTests`, through the existing isolated
 app-host and console-session wrappers. Every suite must report a positive test

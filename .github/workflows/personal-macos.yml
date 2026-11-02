@@ -109,7 +109,7 @@ jobs:
           print(candidates[0])
           PY
           )"
-          for suite in RemoteWorkspaceReconnectIntentTests SSHTuiAttachRetryTests RemoteDisconnectLifecycleTests SidebarWorkspaceSnapshotRefreshPolicyTests CloudStaleInventoryMaterializationTests; do
+          for suite in RemoteWorkspaceReconnectIntentTests SSHTuiAttachRetryTests SSHTuiOpenTests RemoteDisconnectLifecycleTests SidebarWorkspaceSnapshotRefreshPolicyTests CloudStaleInventoryMaterializationTests; do
             log="build/personal-macos/$suite.log"
             scripts/ci/run-in-console-session.sh \
               scripts/ci/run-app-host-xcodebuild.sh \
@@ -133,7 +133,7 @@ jobs:
           receipt = json.loads(path.read_text())
           receipt["appHostTestsExecuted"] = True
           receipt["appHostTestSuites"] = [
-              "RemoteWorkspaceReconnectIntentTests", "SSHTuiAttachRetryTests",
+              "RemoteWorkspaceReconnectIntentTests", "SSHTuiAttachRetryTests", "SSHTuiOpenTests",
               "RemoteDisconnectLifecycleTests", "SidebarWorkspaceSnapshotRefreshPolicyTests",
               "CloudStaleInventoryMaterializationTests",
           ]
