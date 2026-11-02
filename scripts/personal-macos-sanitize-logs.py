@@ -47,9 +47,10 @@ def main():
     if args.reload_log.is_file():
         text = args.reload_log.read_text(errors="replace")
         (args.log_dir / "reload.log").write_text(sanitize(text, secrets))
-    for log in args.log_dir.rglob("*.log"):
-        if log.is_file() and not log.is_symlink():
-            log.write_text(sanitize(log.read_text(errors="replace"), secrets))
+    for pattern in ("*.log", "*.json"):
+        for log in args.log_dir.rglob(pattern):
+            if log.is_file() and not log.is_symlink():
+                log.write_text(sanitize(log.read_text(errors="replace"), secrets))
 
 
 if __name__ == "__main__":
