@@ -1664,15 +1664,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if hasVisibleMainTerminalWindow() {
-            _ = synchronizeActiveMainWindowContext(preferredWindow: NSApp.keyWindow ?? NSApp.mainWindow)
+            synchronizeActiveMainWindowContext(preferredWindow: NSApp.keyWindow ?? NSApp.mainWindow)?
+                .selectTab(at: 0)
             return true
         }
-        if mainWindowVisibilityController.showApplicationWindows(
+        if let window = mainWindowVisibilityController.showApplicationWindows(
             windows: mainWindowsForVisibilityController(),
             reason: .applicationReopen,
             activation: .none
-        ) == nil {
-            _ = ensureInitialMainWindowIfNeeded()
+        ) {
+            synchronizeActiveMainWindowContext(preferredWindow: window)?.selectTab(at: 0)
+        } else {
+            tabManagerFor(windowId: ensureInitialMainWindowIfNeeded())?.selectTab(at: 0)
         }
         return true
     }
@@ -4141,6 +4144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
 
+        // Ordinary launch and Dock reopen share selection. Do this before
+        // deferred navigation is delivered so an explicit target still wins.
+        primaryContext.tabManager.selectTab(at: 0)
         guard let startupSnapshot else { return false }
 
         let additionalWindows = Array(startupSnapshot
