@@ -1,4 +1,4 @@
-name: Inspect active native build progress
+name: Export completed build progress diagnostic
 
 on:
   push:
@@ -10,19 +10,21 @@ permissions:
   actions: read
 
 jobs:
-  inspect:
+  export:
     if: github.repository == 'Steve-Strange/cmux-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Read one active job log and emit stage metadata only
+      - name: Export six metadata fields from the completed diagnostic
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
+          import datetime
           import io
           import json
           import os
+          import pathlib
           import re
           import urllib.error
           import urllib.request
@@ -32,69 +34,104 @@ jobs:
               def redirect_request(self, req, fp, code, msg, headers, newurl):
                   return None
 
-          result = {
-              "httpStatus": 0,
-              "downloadStatus": None,
-              "logBytes": 0,
-              "lastTimestamp": None,
-              "stageCounts": {},
-              "lastStage": None,
+          fields = {"httpStatus", "downloadStatus", "logBytes", "lastTimestamp", "stageCounts", "lastStage"}
+          stages = {
+              "SwiftCompile", "CompileSwiftSources", "CompileSwift", "SwiftEmitModule",
+              "CompileC", "Ld", "CodeSign", "PhaseScriptExecution", "Resolve Package Graph",
+              "** BUILD SUCCEEDED **", "** BUILD FAILED **",
           }
+
+          def integer(value, minimum, maximum):
+              return type(value) is int and minimum <= value <= maximum
+
+          def valid(value):
+              if not isinstance(value, dict) or set(value) != fields:
+                  return False
+              if not integer(value["httpStatus"], 0, 599):
+                  return False
+              if value["downloadStatus"] is not None and not integer(value["downloadStatus"], 0, 599):
+                  return False
+              if not integer(value["logBytes"], 0, 1024 ** 3):
+                  return False
+              stamp = value["lastTimestamp"]
+              if stamp is not None:
+                  if not isinstance(stamp, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z", stamp):
+                      return False
+                  try:
+                      datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                  except ValueError:
+                      return False
+              counts = value["stageCounts"]
+              if not isinstance(counts, dict) or not set(counts) <= stages:
+                  return False
+              if not all(integer(count, 1, 10 ** 9) for count in counts.values()):
+                  return False
+              return value["lastStage"] is None or value["lastStage"] in stages
+
+          http_status = 0
+          download_status = None
+          result = None
           try:
               request = urllib.request.Request(
-                  "https://api.github.com/repos/Steve-Strange/cmux-v2/actions/jobs/125223237140/logs",
+                  "https://api.github.com/repos/Steve-Strange/cmux-v2/actions/jobs/125254743262/logs",
                   headers={
                       "Accept": "application/vnd.github+json",
                       "Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
-                      "User-Agent": "cmux-build-progress",
+                      "User-Agent": "cmux-completed-diagnostic-export",
                   },
               )
-              opener = urllib.request.build_opener(NoRedirect)
               redirect = None
               raw = None
               try:
-                  with opener.open(request, timeout=30) as response:
-                      result["httpStatus"] = response.status
+                  with urllib.request.build_opener(NoRedirect).open(request, timeout=30) as response:
+                      http_status = response.status
                       raw = response.read()
               except urllib.error.HTTPError as error:
-                  result["httpStatus"] = error.code
+                  http_status = error.code
                   if error.code in (301, 302, 303, 307, 308):
                       redirect = error.headers.get("Location")
                   error.close()
               if redirect:
-                  # The signed download URL receives no repository token.
+                  # Never forward the repository token to the signed download.
                   if not redirect.startswith("https://"):
-                      raise ValueError("Unexpected download protocol")
+                      raise ValueError()
                   with urllib.request.urlopen(redirect, timeout=30) as response:
-                      result["downloadStatus"] = response.status
+                      download_status = response.status
                       raw = response.read()
               if raw is not None:
-                  result["logBytes"] = len(raw)
                   if raw.startswith(b"PK\x03\x04"):
                       with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-                          text = "\n".join(
+                          logs = "\n".join(
                               archive.read(entry).decode(errors="replace")
                               for entry in archive.infolist() if not entry.is_dir()
                           )
                   else:
-                      text = raw.decode(errors="replace")
-                  timestamp = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s*")
-                  stage = re.compile(
-                      r"^(SwiftCompile|CompileSwiftSources|CompileSwift|SwiftEmitModule|CompileC|Ld|CodeSign|"
-                      r"PhaseScriptExecution|Resolve Package Graph|\*\* BUILD SUCCEEDED \*\*|\*\* BUILD FAILED \*\*)(?:\s|$)"
-                  )
-                  for line in text.splitlines():
-                      stamp = timestamp.match(line)
-                      if stamp:
-                          result["lastTimestamp"] = stamp.group(1)
-                          line = line[stamp.end():]
-                      match = stage.match(line.strip())
-                      if match:
-                          label = match.group(1)
-                          result["stageCounts"][label] = result["stageCounts"].get(label, 0) + 1
-                          result["lastStage"] = label
+                      logs = raw.decode(errors="replace")
+                  for line in logs.splitlines():
+                      brace = line.find("{")
+                      if brace < 0:
+                          continue
+                      try:
+                          candidate = json.loads(line[brace:])
+                      except (ValueError, TypeError):
+                          continue
+                      if valid(candidate):
+                          result = candidate
           except Exception:
-              # Exception text can include signed URLs. Report only metadata.
+              # Exception text and raw logs can contain signed URLs or credentials.
               pass
-          print(json.dumps(result, sort_keys=True))
+          if result is None:
+              print("Completed diagnostic log API HTTP status:", http_status)
+              print("Completed diagnostic download HTTP status:", download_status)
+              raise SystemExit(1)
+          output = json.dumps(result, sort_keys=True) + "\n"
+          (pathlib.Path(os.environ["RUNNER_TEMP"]) / "build-progress.json").write_text(output)
+          print(output, end="")
           PY
+      - name: Upload metadata only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: completed-build-progress-metadata
+          path: ${{ runner.temp }}/build-progress.json
+          if-no-files-found: error
+          retention-days: 2
