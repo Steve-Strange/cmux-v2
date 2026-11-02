@@ -659,7 +659,8 @@ extension SurfaceResumeBindingIndex {
                 processPath: process.path,
                 arguments: processArguments.arguments,
                 environment: processArguments.environment,
-                capturedAt: capturedAt
+                capturedAt: capturedAt,
+                processID: process.pid
             ) {
                 binding = tmuxBinding
             } else {

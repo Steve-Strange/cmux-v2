@@ -60,6 +60,7 @@ enum TerminalSSHSessionDetector {
 @main
 struct TmuxDetectedNewSessionFixture {
     static func main() throws {
+        try verifyLegacyParserAdmission()
         let executable = CommandLine.arguments[1]
         let socket = CommandLine.arguments[2]
         let pid = Int(CommandLine.arguments[3])!
@@ -77,5 +78,25 @@ struct TmuxDetectedNewSessionFixture {
             })
         let binding = result[SurfaceResumeBindingIndex.PanelKey(workspaceId: workspace, panelId: panel)]?.binding
         print(String(decoding: try JSONEncoder().encode(binding), as: UTF8.self))
+    }
+
+    private static func verifyLegacyParserAdmission() throws {
+        for arguments in [["tmux", "new", "-s", "cmux"], ["tmux", "new", "-sA"],
+                          ["tmux", "new", "-A"], ["tmux", "attach"], ["tmux", "kill-server"]] {
+            let binding = TmuxResumeParser.binding(processName: "tmux", processPath: nil,
+                arguments: arguments, environment: [:], capturedAt: 1)
+            guard binding == nil else {
+                throw NSError(domain: "fixture", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "unverified tmux invocation became resumable: \(arguments)"])
+            }
+        }
+        for arguments in [["tmux", "attach", "-t", "work"], ["tmux", "new", "-As", "work"]] {
+            let binding = TmuxResumeParser.binding(processName: "tmux", processPath: nil,
+                arguments: arguments, environment: [:], capturedAt: 1)
+            guard binding?.launchCommand.arguments == ["tmux", "attach", "-t", "work"] else {
+                throw NSError(domain: "fixture", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "existing explicit attach admission changed: \(arguments)"])
+            }
+        }
     }
 }

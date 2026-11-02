@@ -6,6 +6,7 @@ import json
 import os
 import pty
 import select
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -74,6 +75,14 @@ class TmuxDetectedNewSessionTests(unittest.TestCase):
                 self.assertEqual(missing.returncode, 0, missing.stdout + missing.stderr)
                 self.assertIsNone(json.loads(missing.stdout), "an unrelated PID borrowed a live tmux session")
 
+                subprocess.run([tmux, "-S", socket, "rename-session", "-t", row[1], "renamed"],
+                               capture_output=True, env=environment, timeout=5, check=True)
+                renamed = subprocess.run([str(build / "probe"), tmux, socket, str(client.pid)],
+                                         capture_output=True, text=True, env=environment, timeout=5)
+                self.assertEqual(renamed.returncode, 0, renamed.stdout + renamed.stderr)
+                self.assertEqual(json.loads(renamed.stdout)["checkpointId"], "renamed",
+                                 "restore trusted the original name instead of the current attached session")
+
                 subprocess.run([tmux, "-S", socket, "kill-server"],
                                capture_output=True, env=environment, timeout=5, check=True)
                 client.wait(timeout=5)
@@ -83,6 +92,22 @@ class TmuxDetectedNewSessionTests(unittest.TestCase):
                 absent = subprocess.run([tmux, "-N", "-S", socket, "list-sessions"],
                                         capture_output=True, env=environment, timeout=5)
                 self.assertNotEqual(absent.returncode, 0, "attach-only restore started a new server")
+
+                hung = build / "tmux"
+                query_pid = build / "query-pid"
+                query_fifo = build / "query-wait"
+                os.mkfifo(query_fifo)
+                hung.write_text("#!/bin/sh\n"
+                                f"printf '%s' \"$$\" > {shlex.quote(str(query_pid))}\n"
+                                f"read -r line < {shlex.quote(str(query_fifo))}\n")
+                hung.chmod(0o755)
+                bounded = subprocess.run([str(build / "probe"), str(hung), socket, str(client.pid)],
+                                         capture_output=True, text=True, env=environment, timeout=5)
+                self.assertEqual(bounded.returncode, 0, bounded.stdout + bounded.stderr)
+                self.assertIsNone(json.loads(bounded.stdout), "a timed-out query admitted a resume binding")
+                self.assertTrue(query_pid.exists(), "the bounded query never started")
+                with self.assertRaises(ProcessLookupError, msg="the timed-out query was left running"):
+                    os.kill(int(query_pid.read_text()), 0)
             finally:
                 subprocess.run([tmux, "-N", "-S", socket, "kill-server"],
                                capture_output=True, env=environment, timeout=5)

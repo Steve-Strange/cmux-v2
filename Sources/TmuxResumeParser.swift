@@ -6,14 +6,15 @@ enum TmuxResumeParser {
         processPath: String?,
         arguments: [String],
         environment: [String: String],
-        capturedAt: TimeInterval
+        capturedAt: TimeInterval,
+        processID: Int? = nil
     ) -> SurfaceResumeBindingSnapshot? {
         let observed = ObservedTmuxProcess(
             processName: processName,
             processPath: processPath,
             arguments: arguments
         )
-        guard let invocation = resumeInvocation(observed: observed) else { return nil }
+        guard let invocation = resumeInvocation(observed: observed, processID: processID, environment: environment) else { return nil }
 
         let command = invocation.argv.map(shellSingleQuoted).joined(separator: " ")
         let cwd = normalized(environment["CMUX_AGENT_LAUNCH_CWD"] ?? environment["PWD"])
@@ -98,13 +99,32 @@ enum TmuxResumeParser {
         let sessionName: String?
     }
 
-    private static func resumeInvocation(observed: ObservedTmuxProcess) -> TmuxResumeInvocation? {
+    private static func resumeInvocation(
+        observed: ObservedTmuxProcess,
+        processID: Int?,
+        environment: [String: String]
+    ) -> TmuxResumeInvocation? {
         guard observed.isTmuxProcess else { return nil }
         guard !observed.hasTmuxServerProcessTitle else { return nil }
 
         let executable = tmuxExecutable(observed: observed)
         let tail = tmuxTailArguments(observed: observed)
         let parsed = parseTopLevelArguments(tail)
+        if parsed.requiresAttachedSession {
+            // `new -s` remains in a live client's argv after creation. Never
+            // replay that command: verify its PID and attach the current exact
+            // session, which may have changed since the original invocation.
+            guard let processID, let path = observed.processPath,
+                  argumentLooksLikeTmux(path), !argumentLooksLikeTmuxProcessTitle(path),
+                  let attached = TmuxAttachedSessionResolver().resolve(
+                      processID: processID, executablePath: path,
+                      socketFlags: parsed.socketFlags, environment: environment
+                  ) else { return nil }
+            return TmuxResumeInvocation(
+                argv: [path, "-S", attached.socketPath, "attach", "-t", attached.sessionID],
+                sessionName: attached.sessionName
+            )
+        }
         guard parsed.isSafe else { return nil }
 
         var argv = [executable]
@@ -141,6 +161,7 @@ enum TmuxResumeParser {
         let socketFlags: [String]
         let sessionName: String?
         let isSafe: Bool
+        var requiresAttachedSession = false
     }
 
     private static func parseTopLevelArguments(_ arguments: [String]) -> ParsedTmuxTopLevelArguments {
@@ -178,9 +199,6 @@ enum TmuxResumeParser {
                 isSafe: true
             )
         case "new-session", "new":
-            guard hasFlag(commandArgs, short: "A") else {
-                return ParsedTmuxTopLevelArguments(socketFlags: socketFlags, sessionName: nil, isSafe: false)
-            }
             let sessionName = optionValue(commandArgs, short: "s", long: "session-name")
             guard sessionName != nil else {
                 return ParsedTmuxTopLevelArguments(socketFlags: socketFlags, sessionName: nil, isSafe: false)
@@ -188,7 +206,8 @@ enum TmuxResumeParser {
             return ParsedTmuxTopLevelArguments(
                 socketFlags: socketFlags,
                 sessionName: sessionName,
-                isSafe: true
+                isSafe: true,
+                requiresAttachedSession: !hasFlag(commandArgs, short: "A")
             )
         default:
             return ParsedTmuxTopLevelArguments(socketFlags: socketFlags, sessionName: nil, isSafe: false)
