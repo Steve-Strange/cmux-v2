@@ -56,17 +56,6 @@ PY
 MANIFEST_URL="https://files.cmux.com/cmux-tui/$CLIENT_COMMIT/manifest.json"
 SIGNER_WORKFLOW=manaflow-ai/cmux/.github/workflows/cmux-tui-artifacts.yml
 
-python3 scripts/verify-local.py --only project --only test-wiring --only localization
-git submodule update --init --depth 1 -- ghostty vendor/bonsplit
-./scripts/install-rust-ci.sh
-export PATH="$HOME/.cargo/bin:$PATH"
-
-# Use the upstream checksum and archive validator. A missing prebuilt fails
-# explicitly rather than silently attempting a costly source build with Zig.
-GHOSTTY_SHA="$(git rev-parse HEAD:ghostty)" \
-  GHOSTTYKIT_DOWNLOAD_RETRIES=3 GHOSTTYKIT_DOWNLOAD_RETRY_DELAY=5 \
-  GHOSTTYKIT_DOWNLOAD_MAX_TIME=300 ./scripts/download-prebuilt-ghosttykit.sh
-
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 BUILD_LOG="$OUTPUT_DIR/build.log"
@@ -74,6 +63,18 @@ ZIP_PATH="$OUTPUT_DIR/cmux-$BUILD_TAG.zip"
 # Remove only this helper's prior published outputs so a failed rebuild cannot
 # leave a previous app next to the new build log.
 rm -f "$ZIP_PATH" "$ZIP_PATH.sha256" "$OUTPUT_DIR/build-receipt.json" "$OUTPUT_DIR/portable-bundle.json"
+echo 'Checking personal build inputs and installing dependencies' | tee "$BUILD_LOG"
+python3 scripts/verify-local.py --only project --only test-wiring --only localization 2>&1 | tee -a "$BUILD_LOG"
+git submodule update --init --depth 1 -- ghostty vendor/bonsplit 2>&1 | tee -a "$BUILD_LOG"
+./scripts/install-rust-ci.sh 2>&1 | tee -a "$BUILD_LOG"
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# Use the upstream checksum and archive validator. A missing prebuilt fails
+# explicitly rather than silently attempting a costly source build with Zig.
+GHOSTTY_SHA="$(git rev-parse HEAD:ghostty)" \
+  GHOSTTYKIT_DOWNLOAD_RETRIES=3 GHOSTTYKIT_DOWNLOAD_RETRY_DELAY=5 \
+  GHOSTTYKIT_DOWNLOAD_MAX_TIME=300 ./scripts/download-prebuilt-ghosttykit.sh 2>&1 | tee -a "$BUILD_LOG"
+
 DERIVED_DATA="${CMUX_PERSONAL_DERIVED_DATA:-$HOME/Library/Developer/Xcode/DerivedData/cmux-$BUILD_TAG}"
 unset CMUX_TUI_CLIENT_LOCAL CMUX_SKIP_CMUX_TUI_CLIENT CMUX_ALLOW_UNSIGNED_DEV_APP
 export CMUX_DEV_BACKEND_MODE=local
@@ -81,7 +82,7 @@ export CMUX_GHOSTTYKIT_PREPROVISIONED=1
 export CMUX_SKIP_ZIG_BUILD=1
 ./scripts/reload.sh --tag "$BUILD_TAG" --no-global-cli-links \
   --derived-data "$DERIVED_DATA" --cmux-tui-manifest-url "$MANIFEST_URL" \
-  2>&1 | tee "$BUILD_LOG"
+  2>&1 | tee -a "$BUILD_LOG"
 
 APP_PATH="$(awk '/^App path:/{getline; sub(/^  /, ""); print; exit}' "$BUILD_LOG")"
 [[ -n "$APP_PATH" && -d "$APP_PATH/Contents" ]] || { echo 'Build produced no app.' >&2; exit 1; }
