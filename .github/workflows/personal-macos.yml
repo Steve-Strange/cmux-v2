@@ -70,11 +70,15 @@ jobs:
           python3 tests/test_ssh_browser_forward_lifecycle.py
       - name: Build and archive personal app
         run: ./scripts/personal-macos-build.sh --tag steve-ssh
+      - name: Prepare candidate build logs
+        run: python3 scripts/personal-macos-sanitize-logs.py
       - name: Upload candidate app for isolated dogfood
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cmux-candidate-${{ github.sha }}
-          path: build/personal-macos/
+          path: |
+            build/personal-macos/
+            !build/personal-macos/**/*.xcresult/**
           if-no-files-found: error
           retention-days: 7
       - name: Compile native regression test target
@@ -158,16 +162,24 @@ jobs:
       - name: Preserve tagged reload diagnostics
         if: always()
         run: |
-          mkdir -p build/personal-macos
-          if [[ -f /tmp/cmux-reload-steve-ssh.log ]]; then
-            cp /tmp/cmux-reload-steve-ssh.log build/personal-macos/reload.log
-          fi
+          mkdir -p build/personal-macos/native-test-summaries
+          for result in "$RUNNER_TEMP"/personal-*.xcresult; do
+            [[ -d "$result" ]] || continue
+            suite="$(basename "$result" .xcresult)"
+            summary="build/personal-macos/native-test-summaries/$suite.json"
+            if ! xcrun xcresulttool get test-results summary --path "$result" > "$summary" 2> "$summary.log"; then
+              rm -f "$summary"
+            fi
+          done
+          python3 scripts/personal-macos-sanitize-logs.py
       - name: Upload app and build receipt
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cmux-steve-ssh-${{ github.sha }}
-          path: build/personal-macos/
+          path: |
+            build/personal-macos/
+            !build/personal-macos/**/*.xcresult/**
           if-no-files-found: warn
           retention-days: 14
       - name: Upload native test results
@@ -175,6 +187,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cmux-native-tests-${{ github.sha }}
-          path: ${{ runner.temp }}/personal-*.xcresult
+          path: build/personal-macos/native-test-summaries/
           if-no-files-found: ignore
           retention-days: 14
