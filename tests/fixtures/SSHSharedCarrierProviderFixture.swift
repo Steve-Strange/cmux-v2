@@ -18,6 +18,12 @@ struct FixtureRenameService { let environment = FixtureEnvironment() }
     var remoteConnectionResumeEnabled = true
     let isRetiredFromOwningTabManager = false
     var remoteConfiguration: FixtureSSHConfiguration? = FixtureSSHConfiguration()
+    var cloudPendingCreations: [UUID: CloudTerminalPaneReservation] = [:]
+    var panels: [UUID: Bool] = [:]
+    let cloudPaneCreationFailureStore = FixtureCreationStore()
+    func completeReservedCloudTerminalPane(_ reservation: CloudTerminalPaneReservation, adoptedPanelID: UUID) {}
+    func restartReservedCloudTerminalPane(_ reservation: CloudTerminalPaneReservation) {}
+    func failReservedCloudTerminalPane(_ reservation: CloudTerminalPaneReservation, error: Error) {}
     static func liveWorkspace(id: UUID) -> Workspace? {
         AppDelegate.shared?.workspaces.first { $0.id == id }
     }
@@ -25,6 +31,7 @@ struct FixtureRenameService { let environment = FixtureEnvironment() }
 @MainActor final class AppDelegate {
     static let shared: AppDelegate? = AppDelegate()
     var workspaces: [Workspace] = []
+    var cloudOperations: Bool? { nil }
     func surfaceCatalogWorkspaces() -> [Workspace] { workspaces }
 }
 struct ManagedRemoteConnectionsPolicy { static let isEnabled = true }

@@ -35,7 +35,9 @@ class SSHSharedCarrierPauseTests(unittest.TestCase):
                     ROOT / "Sources/Surfaces/SurfaceCatalog+CloudTerminalNavigation.swift",
                     ROOT / "Sources/Surfaces/SurfaceCatalog+SSHTransport.swift",
                     ROOT / "Sources/Surfaces/TerminalController+CloudTerminalCreation.swift",
-                    ROOT / "tests/fixtures/SSHExplicitSurfaceIntentFixture.swift"])
+                    ROOT / "Sources/Surfaces/Workspace+OptimisticCloudTerminalCreation.swift",
+                    ROOT / "tests/fixtures/SSHExplicitSurfaceIntentFixture.swift",
+                    ROOT / "tests/fixtures/SSHOptimisticCreationIntentFixture.swift"])
             self.compile(environment, ["-parse-as-library", "-I", str(build), "-L", str(build),
                 "-lCmuxCloud", "-Xlinker", "-rpath", "-Xlinker", str(build),
                 *map(str, sources), str(ROOT / "tests/fixtures/SSHSharedCarrierPauseFixture.swift"),

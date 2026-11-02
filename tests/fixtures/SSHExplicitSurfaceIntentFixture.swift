@@ -5,18 +5,24 @@ struct SurfaceMachineID: Hashable, Sendable {
     let rawValue: String
     var isSSH: Bool { rawValue.hasPrefix("ssh:") }
 }
-struct SurfaceResourceID: Sendable {
+struct SurfaceResourceID: Hashable, Sendable {
     let machine: SurfaceMachineID
     let key = "term_fixture"
     var rawValue: String { machine.rawValue + "/terminal/" + key }
 }
 struct SurfaceRemoteWorkspace: Sendable { let id = "ws_fixture"; let name = "Fixture" }
-struct SurfaceRemoteView: Sendable { let workspace = SurfaceRemoteWorkspace() }
+struct SurfaceRemoteView: Sendable { let workspace = SurfaceRemoteWorkspace(); let tabID = "tab_fixture" }
 struct SurfaceResource: Sendable {
     let id: SurfaceResourceID
     let remoteWorkspace: SurfaceRemoteWorkspace? = nil
+    var machine: SurfaceMachineID { id.machine }
 }
-struct SurfaceProjection: Sendable { let workspaceID: UUID; let panelID = UUID() }
+struct SurfaceProjection: Sendable {
+    let workspaceID: UUID
+    let panelID = UUID()
+    let resource = SurfaceResourceID(machine: SurfaceMachineID(rawValue: "ssh:fixture"))
+    let remoteTabID: String? = nil
+}
 struct SurfaceResourcePlacement: Sendable {}
 struct SurfaceResourceGroup: Sendable {}
 struct SurfaceProjectionLayout: Sendable {}
@@ -51,11 +57,13 @@ struct FixtureNewWorkspaceHost { static let appOptimistic = FixtureNewWorkspaceH
     let snapshot = 0
     let cloudWorkspaceRenameService = FixtureRenameService()
     let cloudWorkspaceProjectionCoordinator = FixtureProjectionCoordinator()
+    var projections: [SurfaceProjection] = []
     func provider(for machine: SurfaceMachineID) -> CmuxTuiSurfaceProvider? { fixtureProvider }
     // The carrier is real. The catalog host supplies the pane and graph, so the
     // actual UI/socket adapters must convey deliberate intent before transport.
     func project(_ id: SurfaceResourceID, into destination: SurfaceDestination, focus: Bool,
         reuseExisting: Bool, reuseInWorkspace: UUID? = nil, remoteView: SurfaceRemoteView? = nil,
+        adopting reservation: CloudTerminalPaneReservation? = nil,
         explicitOpen: Bool = false) async throws -> (projection: SurfaceProjection, reused: Bool) {
         let provider = fixtureProvider!
         let use = try beginExplicitSSHTransportUse(on: explicitOpen ? [id.machine] : [], in: destination.workspaceID)
@@ -69,12 +77,16 @@ struct FixtureNewWorkspaceHost { static let appOptimistic = FixtureNewWorkspaceH
         -> (workspaceID: UUID, projections: [SurfaceProjection]) { (UUID(), []) }
     func bindCloudWorkspace(localWorkspaceID: UUID, machine: SurfaceMachineID,
         remoteWorkspaceID: String, generatedTitle: String) {}
+    enum EndReason { case replaced }
+    func endProjections(panelID: UUID, reason: EndReason) {}
 }
 struct TerminalController {
     static func surfaceProvider(for machine: SurfaceMachineID, catalog: SurfaceCatalog) async throws
         -> CmuxTuiSurfaceProvider? { await catalog.provider(for: machine) }
 }
 extension CmuxTuiSurfaceProvider {
+    func bindOptimisticTerminalInput(_ relay: Bool, terminalID: String) async throws -> Bool { true }
+    func beginAttachHandshake(for reservation: CloudTerminalPaneReservation) {}
     func createTerminal(command: [String]?, cwd: String?, name: String?, remoteWorkspaceID: String?) async throws -> SurfaceResource {
         guard !isSSHTransportPaused else { throw CancellationError() }
         _ = try await (links as! SSHTuiLinkManager).connected(machineID: machineID)
@@ -142,5 +154,6 @@ struct SSHExplicitSurfaceIntentFixture {
             exit(1)
         }
         print("PASS deliberate UI terminal open and socket create after managed disconnect")
+        try await SSHOptimisticCreationIntentFixture.run()
     }
 }

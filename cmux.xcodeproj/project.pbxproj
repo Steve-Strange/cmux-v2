@@ -4422,6 +4422,7 @@
 				B11D00000000000000000003 /* Workspace+MobileAgentStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11D00000000000000000004 /* Workspace+MobileAgentStatus.swift */; };
 		9504A0010000000000000001 /* Workspace+MovingTabSplit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9504A0010000000000000002 /* Workspace+MovingTabSplit.swift */; };
 		8B45A4329C234E6FB261E635 /* Workspace+NotificationsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688C3F45DAA548B3B57DE780 /* Workspace+NotificationsPane.swift */; };
+		99FFEC5EE8940DA57C8FE1D5 /* Workspace+OptimisticCloudTerminalCreation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04F0E63E87218B97128F380A /* Workspace+OptimisticCloudTerminalCreation.swift */; };
 		1828BDC4C9B442F8A327FBFA /* Workspace+PanelCustomTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DA836A743294BF0A7154177 /* Workspace+PanelCustomTitle.swift */; };
 		C3744E010000000000000001 /* Workspace+PanelLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3744E020000000000000001 /* Workspace+PanelLifecycle.swift */; };
 		6E105774324C4357B85DA653 /* Workspace+PanelTitleOwnership.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29D51D04837340F896573F0B /* Workspace+PanelTitleOwnership.swift */; };
@@ -8977,6 +8978,7 @@
 				B11D00000000000000000004 /* Workspace+MobileAgentStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Workspace+MobileAgentStatus.swift"; sourceTree = "<group>"; };
 		9504A0010000000000000002 /* Workspace+MovingTabSplit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Workspace+MovingTabSplit.swift"; sourceTree = "<group>"; };
 		688C3F45DAA548B3B57DE780 /* Workspace+NotificationsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Workspace+NotificationsPane.swift"; sourceTree = "<group>"; };
+		04F0E63E87218B97128F380A /* Workspace+OptimisticCloudTerminalCreation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Workspace+OptimisticCloudTerminalCreation.swift"; sourceTree = "<group>"; };
 		1DA836A743294BF0A7154177 /* Workspace+PanelCustomTitle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Workspace+PanelCustomTitle.swift"; sourceTree = "<group>"; };
 		C3744E020000000000000001 /* Workspace+PanelLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Workspace+PanelLifecycle.swift"; sourceTree = "<group>"; };
 		29D51D04837340F896573F0B /* Workspace+PanelTitleOwnership.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Workspace+PanelTitleOwnership.swift"; sourceTree = "<group>"; };
@@ -9850,6 +9852,7 @@
 				3DFF200DB7C41C0D2840A217 /* CmuxTuiSurfaceProvider+SSHTransport.swift */,
 				BBA814CF80D61278E0AC93D0 /* CmuxTuiSurfaceProvider+SSHBrowserRoutes.swift */,
 				6A6A9645E3B1A3C8C0CCBD16 /* SurfaceCatalog+SSHTransport.swift */,
+				04F0E63E87218B97128F380A /* Workspace+OptimisticCloudTerminalCreation.swift */,
 			);
 			name = Surfaces;
 			path = Surfaces;
@@ -17344,6 +17347,7 @@
 				B11D00000000000000000003 /* Workspace+MobileAgentStatus.swift in Sources */,
 				9504A0010000000000000001 /* Workspace+MovingTabSplit.swift in Sources */,
 				8B45A4329C234E6FB261E635 /* Workspace+NotificationsPane.swift in Sources */,
+				99FFEC5EE8940DA57C8FE1D5 /* Workspace+OptimisticCloudTerminalCreation.swift in Sources */,
 				1828BDC4C9B442F8A327FBFA /* Workspace+PanelCustomTitle.swift in Sources */,
 				C3744E010000000000000001 /* Workspace+PanelLifecycle.swift in Sources */,
 				6E105774324C4357B85DA653 /* Workspace+PanelTitleOwnership.swift in Sources */,
