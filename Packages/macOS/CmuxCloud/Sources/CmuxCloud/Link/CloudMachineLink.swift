@@ -233,7 +233,10 @@ public actor CloudMachineLink {
         process.arguments = ssh?.arguments(
             stateDirectory: paths.stateDir.path,
             deviceName: CloudTuiClientPaths.deviceName(),
-            upgrade: sshUpgrade
+            upgrade: sshUpgrade,
+            // Give runtime setup the same budget as the native owner, with
+            // one second left for its diagnostic and child-process teardown.
+            startupTimeout: timeout - .seconds(1)
         ) ?? CloudTuiCommandLine.linkArguments(
             route: route,
             deviceName: CloudTuiClientPaths.deviceName(),

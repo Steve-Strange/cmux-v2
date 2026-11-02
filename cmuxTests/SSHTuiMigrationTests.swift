@@ -135,9 +135,12 @@ struct SSHTuiMigrationTests {
         }
         // Reconnect limits apply to the whole carrier lifetime, so capping them
         // would end SSH persistence after the first network drop.
-        for limit in ["--reconnect-attempts", "--reconnect-attempt-timeout-ms", "--connect-timeout-seconds"] {
+        for limit in ["--reconnect-attempts", "--reconnect-attempt-timeout-ms"] {
             #expect(!arguments.contains(limit))
         }
+        // The bare builder uses the runtime's startup default. Its native
+        // link owner supplies a startup budget without capping later retries.
+        #expect(!arguments.contains("--connect-timeout-seconds"))
     }
 
     @Test("Restore-only SSH carriers request sidecar recovery")

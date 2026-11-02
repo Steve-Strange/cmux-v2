@@ -196,10 +196,27 @@ public struct SSHTuiConnection: Sendable {
         ["/bin/sh", "-c", "exec \"${SHELL:-/bin/sh}\" -lc \"$1\"", "cmux-ssh", command]
     }
 
-    public func arguments(stateDirectory: String, deviceName: String, upgrade: Bool = false) -> [String] {
+    /// Builds a carrier launch, optionally bounding only its initial setup.
+    ///
+    /// - Parameters:
+    ///   - stateDirectory: The client's persistent state directory.
+    ///   - deviceName: The local device name reported to the remote host.
+    ///   - upgrade: Whether to repair or update the remote sidecar on attach.
+    ///   - startupTimeout: The caller's initial setup budget, rounded down to
+    ///     positive whole seconds. This does not limit subsequent reconnects.
+    /// - Returns: Arguments for the pinned cmux-tui SSH runtime.
+    public func arguments(
+        stateDirectory: String,
+        deviceName: String,
+        upgrade: Bool = false,
+        startupTimeout: Duration? = nil
+    ) -> [String] {
         var arguments = ["remote", "ssh", configuration.destination, "--headless", "--json",
                          "--exit-with-parent", "--lanes", "single", "--carrier",
                          "--session", session, "--state-dir", stateDirectory]
+        if let startupTimeout {
+            arguments += ["--connect-timeout-seconds", String(max(1, startupTimeout.components.seconds))]
+        }
         var sshArguments = ["-o", "BatchMode=yes", "-o", "RequestTTY=no", "-o", "RemoteCommand=none"]
         if let port = configuration.port { sshArguments += ["-p", String(port)] }
         if let identity = configuration.identityFile { sshArguments += ["-i", identity] }
