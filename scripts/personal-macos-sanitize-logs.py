@@ -24,6 +24,10 @@ def secret_forms(environment):
 
 
 def sanitize(text, secrets):
+    # Replace before dropping environment rows: a multiline value can continue
+    # beyond the export row and must be removed as a whole first.
+    for value in secrets:
+        text = text.replace(value, "***")
     # Xcode script phases print their inherited environment by default. These
     # rows add no compiler evidence, so omit them instead of keeping a partial
     # list of redacted variable names.
@@ -31,8 +35,6 @@ def sanitize(text, secrets):
         line for line in text.splitlines(keepends=True)
         if not re.match(r"^\s*(?:export|declare\s+-x)\s+[A-Za-z_][A-Za-z0-9_]*(?:=|\s|$)", line)
     )
-    for value in secrets:
-        text = text.replace(value, "***")
     return text
 
 
