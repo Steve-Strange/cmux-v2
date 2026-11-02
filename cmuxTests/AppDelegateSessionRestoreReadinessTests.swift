@@ -76,6 +76,161 @@ struct AppDelegateSessionRestoreReadinessTests {
     }
 }
 
+@Suite(.serialized, .exclusiveAppContext)
+@MainActor
+struct AppDelegateOrdinaryOpenTests {
+    private func withRegisteredWindow(
+        _ body: (AppDelegate, NSWindow, TabManager) throws -> Void
+    ) throws {
+        _ = NSApplication.shared
+        let previousApp = AppDelegate.shared
+        let previousManager = TerminalController.shared.activeTabManagerForCallerNotification()
+        let app = AppDelegate()
+        app.didAttemptStartupSessionRestore = true
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 320),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        let windowId = UUID()
+        window.identifier = NSUserInterfaceItemIdentifier("cmux.main.\(windowId.uuidString)")
+        let manager = TabManager(autoWelcomeIfNeeded: false)
+        _ = try #require(manager.addTab())
+        app.registerMainWindow(
+            window,
+            windowId: windowId,
+            tabManager: manager,
+            sidebarState: SidebarState(),
+            sidebarSelectionState: SidebarSelectionState()
+        )
+        defer {
+            for context in Array(app.mainWindowContexts.values) {
+                let ownedWindow = context.window
+                app.unregisterMainWindowContextForTesting(windowId: context.windowId)
+                ownedWindow?.orderOut(nil)
+            }
+            window.orderOut(nil)
+            TerminalController.shared.setActiveTabManager(previousManager)
+            AppDelegate.shared = previousApp
+        }
+        try body(app, window, manager)
+    }
+
+    private func awaitSigningSecretReadiness() async {
+        await withCheckedContinuation { continuation in
+            SurfaceResumeApprovalStore.whenSigningSecretReady {
+                continuation.resume()
+            }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func repeatedReopenSelectsFirstWorkspaceWithoutAddingWindowsOrWorkspaces(hidden: Bool) throws {
+        try withRegisteredWindow { app, window, manager in
+            let workspaceIds = manager.tabs.map(\.id)
+            let windowIds = Set(app.mainWindowContexts.values.map(\.windowId))
+            window.orderFront(nil)
+            if hidden {
+                app.mainWindowVisibilityController.dismissWindows(windows: [window], reason: .titlebarDismiss)
+            }
+            for _ in 0..<2 {
+                manager.selectTab(try #require(manager.tabs.last))
+                #expect(app.applicationShouldHandleReopen(NSApp, hasVisibleWindows: !hidden))
+                #expect(manager.selectedTabId == workspaceIds.first)
+                #expect(manager.tabs.map(\.id) == workspaceIds)
+                #expect(Set(app.mainWindowContexts.values.map(\.windowId)) == windowIds)
+            }
+        }
+    }
+
+    @Test
+    func ordinaryStartupSelectsFirstWorkspaceAfterRestoringSavedSelection() async throws {
+        await awaitSigningSecretReadiness()
+        try withRegisteredWindow { app, window, manager in
+            let snapshot = manager.sessionSnapshot(includeScrollback: false)
+            manager.restoreSessionSnapshot(snapshot)
+            let workspaceIds = manager.tabs.map(\.id)
+            #expect(manager.selectedTabId == workspaceIds.last)
+            app.didAttemptStartupSessionRestore = false
+            app.registerMainWindow(
+                window,
+                windowId: try #require(manager.windowId),
+                tabManager: manager,
+                sidebarState: SidebarState(),
+                sidebarSelectionState: SidebarSelectionState()
+            )
+            #expect(app.didCompleteInitialSessionRestore)
+            #expect(manager.selectedTabId == workspaceIds.first)
+            #expect(manager.tabs.map(\.id) == workspaceIds)
+        }
+    }
+
+    @Test
+    func explicitStartupOpenKeepsItsSelectedWorkspace() async throws {
+        await awaitSigningSecretReadiness()
+        try withRegisteredWindow { app, window, manager in
+            let selectedId = manager.selectedTabId
+            app.didAttemptStartupSessionRestore = false
+            app.prepareForExplicitOpenIntentAtStartup()
+            app.registerMainWindow(
+                window,
+                windowId: try #require(manager.windowId),
+                tabManager: manager,
+                sidebarState: SidebarState(),
+                sidebarSelectionState: SidebarSelectionState()
+            )
+            #expect(manager.selectedTabId == selectedId)
+        }
+    }
+
+    @Test
+    func deferredStartupNavigationKeepsItsRequestedWorkspace() async throws {
+        await awaitSigningSecretReadiness()
+        try withRegisteredWindow { app, window, manager in
+            let target = try #require(manager.tabs.last)
+            app.pendingStartupNavigationURLRequests = [CmuxNavigationURLRequest(
+                originalURL: try #require(URL(string: "cmux://workspace/\(target.id.uuidString)")),
+                target: .workspace(target.id),
+                stableFallbackWorkspaceId: nil,
+                stableFallbackSurfaceId: nil
+            )]
+            app.didAttemptStartupSessionRestore = false
+            app.registerMainWindow(
+                window,
+                windowId: try #require(manager.windowId),
+                tabManager: manager,
+                sidebarState: SidebarState(),
+                sidebarSelectionState: SidebarSelectionState()
+            )
+            #expect(app.pendingStartupNavigationURLRequests.isEmpty)
+            #expect(manager.selectedTabId == target.id)
+        }
+    }
+
+    @Test
+    func manualSessionRestoreKeepsSavedSelection() throws {
+        try withRegisteredWindow { app, _, manager in
+            let savedWindowId = UUID()
+            let snapshot = AppSessionSnapshot(
+                version: SessionSnapshotSchema.currentVersion,
+                createdAt: 1_700_000_000,
+                windows: [SessionWindowSnapshot(
+                    windowId: savedWindowId,
+                    frame: nil,
+                    display: nil,
+                    tabManager: manager.sessionSnapshot(includeScrollback: false),
+                    sidebar: SessionSidebarSnapshot(isVisible: true, selection: .tabs, width: nil)
+                )]
+            )
+            #expect(app.restorePreviousSessionSnapshot(snapshot, shouldActivate: false))
+            let restored = try #require(app.tabManagerFor(windowId: savedWindowId))
+            #expect(restored.tabs.count == 2)
+            #expect(restored.selectedTabId == restored.tabs.last?.id)
+        }
+    }
+}
+
 // Regression guard for https://github.com/manaflow-ai/cmux/issues/5757.
 //
 // `controlResolveOnMain` gates the full-tree `v2RefreshKnownRefs()` pass on
