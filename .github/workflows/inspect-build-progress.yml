@@ -1,0 +1,100 @@
+name: Inspect active native build progress
+
+on:
+  push:
+    branches: [codex/build-progress]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    if: github.repository == 'Steve-Strange/cmux-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read one active job log and emit stage metadata only
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import io
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+          import zipfile
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          result = {
+              "httpStatus": 0,
+              "downloadStatus": None,
+              "logBytes": 0,
+              "lastTimestamp": None,
+              "stageCounts": {},
+              "lastStage": None,
+          }
+          try:
+              request = urllib.request.Request(
+                  "https://api.github.com/repos/Steve-Strange/cmux-v2/actions/jobs/125223237140/logs",
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                      "User-Agent": "cmux-build-progress",
+                  },
+              )
+              opener = urllib.request.build_opener(NoRedirect)
+              redirect = None
+              raw = None
+              try:
+                  with opener.open(request, timeout=30) as response:
+                      result["httpStatus"] = response.status
+                      raw = response.read()
+              except urllib.error.HTTPError as error:
+                  result["httpStatus"] = error.code
+                  if error.code in (301, 302, 303, 307, 308):
+                      redirect = error.headers.get("Location")
+                  error.close()
+              if redirect:
+                  # The signed download URL receives no repository token.
+                  if not redirect.startswith("https://"):
+                      raise ValueError("Unexpected download protocol")
+                  with urllib.request.urlopen(redirect, timeout=30) as response:
+                      result["downloadStatus"] = response.status
+                      raw = response.read()
+              if raw is not None:
+                  result["logBytes"] = len(raw)
+                  if raw.startswith(b"PK\x03\x04"):
+                      with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                          text = "\n".join(
+                              archive.read(entry).decode(errors="replace")
+                              for entry in archive.infolist() if not entry.is_dir()
+                          )
+                  else:
+                      text = raw.decode(errors="replace")
+                  timestamp = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s*")
+                  stage = re.compile(
+                      r"^(SwiftCompile|CompileSwiftSources|CompileSwift|SwiftEmitModule|CompileC|Ld|CodeSign|"
+                      r"PhaseScriptExecution|Resolve Package Graph|\*\* BUILD SUCCEEDED \*\*|\*\* BUILD FAILED \*\*)(?:\s|$)"
+                  )
+                  for line in text.splitlines():
+                      stamp = timestamp.match(line)
+                      if stamp:
+                          result["lastTimestamp"] = stamp.group(1)
+                          line = line[stamp.end():]
+                      match = stage.match(line.strip())
+                      if match:
+                          label = match.group(1)
+                          result["stageCounts"][label] = result["stageCounts"].get(label, 0) + 1
+                          result["lastStage"] = label
+          except Exception:
+              # Exception text can include signed URLs. Report only metadata.
+              pass
+          print(json.dumps(result, sort_keys=True))
+          PY
