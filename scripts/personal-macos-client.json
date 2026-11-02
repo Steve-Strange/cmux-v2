@@ -1,0 +1,12 @@
+{
+  "upstreamSourceCommit": "9d01f956c51cd895e10e7d56b6dd7b5f6fcce625",
+  "clientCommit": "a9b104f3cb7d3808cf7eb5ae08b4819333b25870",
+  "manifestURL": "https://files.cmux.com/cmux-tui/a9b104f3cb7d3808cf7eb5ae08b4819333b25870/manifest.json",
+  "signerWorkflow": "manaflow-ai/cmux/.github/workflows/cmux-tui-artifacts.yml",
+  "inputs": {
+    ".github/workflows/cmux-tui-artifacts.yml": "16fc603c0dcf4cf83bb4b9e2fc8fd485491a878e",
+    ".github/workflows/cmux-tui-build-package.yml": "3b1ab09a281d24c13ef836ef899c66f4e7a8060f",
+    "cmux-tui": "5d6df7d7889c44934eb78538f96836a425f91991",
+    "ghostty": "cb1ef7091cdef0b581ee2cbd83742b653253523e"
+  }
+}

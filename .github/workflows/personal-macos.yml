@@ -1,0 +1,152 @@
+name: Personal macOS build
+
+on:
+  push:
+    branches: [codex/macos-ssh-persistence, 'macos/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: personal-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.repository == 'Steve-Strange/cmux-v2'
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CMUX_DEV_BACKEND_MODE: local
+      CMUX_CI_MAX_MACOS_SDK_MAJOR: '26'
+      CMUX_CI_APP_HOST_ISOLATION_REQUIRED: '1'
+      CMUX_APP_HOST_SHARD: '1'
+      CMUX_APP_HOST_XCODEBUILD_ATTEMPTS: '1'
+    steps:
+      - name: Checkout personal source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Configure isolated build directories
+        run: |
+          echo "CMUX_SOURCE_PACKAGES_DIR=$RUNNER_TEMP/cmux-steve-ssh-packages" >> "$GITHUB_ENV"
+          echo "CMUX_DERIVED_DATA_PATH=$RUNNER_TEMP/cmux-steve-ssh-tests" >> "$GITHUB_ENV"
+      - name: Select Xcode
+        run: ./scripts/select-ci-xcode.sh
+      - name: Ensure Metal compiler
+        run: |
+          if ! xcrun metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+      - name: Restore dependency downloads
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/Library/Caches/cmux/cmux-tui-client
+            ~/Library/Caches/cmux/coderouter
+          key: personal-macos-${{ runner.arch }}-${{ hashFiles('Native/**/Cargo.lock', 'scripts/personal-macos-client.json') }}
+          restore-keys: personal-macos-${{ runner.arch }}-
+      - name: Test SSH reconnection policy
+        run: swift test --package-path Packages/macOS/CmuxRemoteSession --filter 'PersistentSSHReconnectTests|RemoteReconnectPolicyTests'
+      - name: Test remote workspace persistence
+        run: swift test --package-path Packages/macOS/CmuxCore --filter SessionRemoteWorkspaceSnapshotTests
+      - name: Test connection labels and sidebar updates
+        run: |
+          python3 tests/test_terminal_connection_presentation.py
+          python3 tests/test_sidebar_remote_status_refresh.py
+      - name: Build and archive personal app
+        run: ./scripts/personal-macos-build.sh --tag steve-ssh
+      - name: Compile native regression test target
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016 # Xcode expands its inherited build setting.
+          ./scripts/test-unit.sh \
+            -derivedDataPath "$CMUX_DERIVED_DATA_PATH" \
+            -clonedSourcePackagesDirPath "$CMUX_SOURCE_PACKAGES_DIR" \
+            -disableAutomaticPackageResolution \
+            -resultBundlePath "$PWD/build/personal-macos/test-build.xcresult" \
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) CMUX_CI_APP_HOST_ISOLATION_REQUIRED' \
+            CMUX_SKIP_ZIG_BUILD=1 \
+            build-for-testing 2>&1 | tee build/personal-macos/test-build.log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("build/personal-macos/build-receipt.json")
+          receipt = json.loads(path.read_text())
+          receipt["appHostTestTargetCompiled"] = True
+          path.write_text(json.dumps(receipt, indent=2) + "\n")
+          PY
+      - name: Prepare isolated app-host home
+        id: prepare-app-host-home
+        run: scripts/ci/prepare-app-host-home.sh
+      - name: Enable XCTest automation mode
+        run: scripts/ci/enable-xctest-automation-mode.sh
+      - name: Run native SSH and workspace regressions
+        run: |
+          set -euo pipefail
+          xctestrun="$(python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          products = Path(os.environ["CMUX_DERIVED_DATA_PATH"]) / "Build/Products"
+          candidates = list(products.glob("*.xctestrun"))
+          if len(candidates) != 1:
+              raise SystemExit(f"Expected one native test product, found {len(candidates)}")
+          print(candidates[0])
+          PY
+          )"
+          for suite in RemoteWorkspaceReconnectIntentTests SSHTuiAttachRetryTests RemoteDisconnectLifecycleTests SidebarWorkspaceSnapshotRefreshPolicyTests; do
+            log="build/personal-macos/$suite.log"
+            scripts/ci/run-in-console-session.sh \
+              scripts/ci/run-app-host-xcodebuild.sh \
+              -xctestrun "$xctestrun" \
+              -destination 'platform=macOS' \
+              -parallel-testing-enabled NO \
+              -resultBundlePath "$RUNNER_TEMP/personal-$suite.xcresult" \
+              "-only-testing:cmuxTests/$suite" \
+              CMUX_SKIP_ZIG_BUILD=1 \
+              test-without-building 2>&1 | tee "$log"
+            if ! grep -Eq 'Test run with [1-9][0-9]* tests?([[:space:]]|$)|Executed [1-9][0-9]* tests?([[:space:],]|$)' "$log"; then
+              echo "::error::No tests executed for $suite"
+              exit 1
+            fi
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("build/personal-macos/build-receipt.json")
+          receipt = json.loads(path.read_text())
+          receipt["appHostTestsExecuted"] = True
+          receipt["appHostTestSuites"] = [
+              "RemoteWorkspaceReconnectIntentTests", "SSHTuiAttachRetryTests",
+              "RemoteDisconnectLifecycleTests", "SidebarWorkspaceSnapshotRefreshPolicyTests",
+          ]
+          path.write_text(json.dumps(receipt, indent=2) + "\n")
+          PY
+      - name: Clean up isolated app-host home
+        if: ${{ always() && steps.prepare-app-host-home.outcome != 'skipped' && steps.prepare-app-host-home.outcome != '' }}
+        run: scripts/ci/run-in-console-session.sh scripts/ci/cleanup-app-host-home.sh
+      - name: Upload app and build receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cmux-steve-ssh-${{ github.sha }}
+          path: build/personal-macos/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload native test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cmux-native-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/personal-*.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
