@@ -31,7 +31,10 @@ class SSHSharedCarrierPauseTests(unittest.TestCase):
             if intent.exists():
                 sources.extend([intent,
                     ROOT / "Sources/Surfaces/CmuxTuiSurfaceProvider+SSHTransport.swift",
-                    ROOT / "tests/fixtures/SSHSharedCarrierProviderFixture.swift"])
+                    ROOT / "tests/fixtures/SSHSharedCarrierProviderFixture.swift",
+                    ROOT / "Sources/Surfaces/SurfaceCatalog+CloudTerminalNavigation.swift",
+                    ROOT / "Sources/Surfaces/TerminalController+CloudTerminalCreation.swift",
+                    ROOT / "tests/fixtures/SSHExplicitSurfaceIntentFixture.swift"])
             self.compile(environment, ["-parse-as-library", "-I", str(build), "-L", str(build),
                 "-lCmuxCloud", "-Xlinker", "-rpath", "-Xlinker", str(build),
                 *map(str, sources), str(ROOT / "tests/fixtures/SSHSharedCarrierPauseFixture.swift"),

@@ -31,6 +31,7 @@ struct SSHSharedCarrierPauseFixture {
         if implicitRestarted || starts != 1 || stops != 1 { exit(1) }
         try await sharedConsumerAndResumeCases()
         try await resumeDuringTeardown()
+        try await SSHExplicitSurfaceIntentFixture.run()
     }
 
     @MainActor
