@@ -31,10 +31,12 @@ public struct CloudTuiClientPaths: Sendable {
     public static func deviceName() -> String { "fixture" }
 }
 
+#if !CMUX_REAL_SSH_ARGUMENTS
 public struct SSHTuiConnection: Sendable {
     public var sshProcessEnvironment: [String: String] { ProcessInfo.processInfo.environment }
     public func arguments(stateDirectory: String, deviceName: String, upgrade: Bool) -> [String] { [] }
 }
+#endif
 
 public struct CloudTuiCommandLine {
     public static func linkArguments(route: String, deviceName: String, stateDir: String,
