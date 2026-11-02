@@ -67,6 +67,7 @@ jobs:
           python3 tests/test_sidebar_remote_status_refresh.py
           python3 tests/test_ssh_attachment_reconnect_intent.py
           python3 tests/test_ssh_shared_carrier_pause.py
+          python3 tests/test_ssh_browser_forward_lifecycle.py
       - name: Build and archive personal app
         run: ./scripts/personal-macos-build.sh --tag steve-ssh
       - name: Compile native regression test target
