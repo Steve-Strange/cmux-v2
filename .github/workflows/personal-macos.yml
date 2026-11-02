@@ -61,11 +61,12 @@ jobs:
         run: |
           set -euo pipefail
           swift test --package-path Packages/macOS/CmuxCore --filter SessionRemoteWorkspaceSnapshotTests 2>&1 | tee build/personal-macos/snapshot-tests.log
-      - name: Test connection labels and sidebar updates
+      - name: Test SSH attachments and connection presentation
         run: |
           python3 tests/test_terminal_connection_presentation.py
           python3 tests/test_sidebar_remote_status_refresh.py
           python3 tests/test_ssh_attachment_reconnect_intent.py
+          python3 tests/test_ssh_shared_carrier_pause.py
       - name: Build and archive personal app
         run: ./scripts/personal-macos-build.sh --tag steve-ssh
       - name: Compile native regression test target
